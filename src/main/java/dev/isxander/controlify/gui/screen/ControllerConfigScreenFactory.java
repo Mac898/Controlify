@@ -909,23 +909,42 @@ public class ControllerConfigScreenFactory {
 			gyroGroup.option(LabelOption.create(Component.translatable("controlify.gui.group.gyro.no_gyro.tooltip").withStyle(ChatFormatting.RED)));
 		}
 
-		Option<Float> gyroSensitivity;
+		// Two sensitivity sliders — one per axis — replacing the previous single combined slider.
+		// Range bumped from 0..300% to 0..500% per user feedback (300% wasn't enough headroom for
+		// some controllers' raw gyro output). Dependent options grey out when both are zero.
 		List<Option<?>> gyroOptions = new ArrayList<>();
-		gyroGroup.option(gyroSensitivity = Option.<Float>createBuilder()
-				.name(Component.translatable("controlify.gui.gyro_look_sensitivity"))
+		Option<Float> gyroSensitivityX = Option.<Float>createBuilder()
+				.name(Component.translatable("controlify.gui.gyro_look_sensitivity_x"))
 				.description(OptionDescription.createBuilder()
-						.text(Component.translatable("controlify.gui.gyro_look_sensitivity.tooltip"))
+						.text(Component.translatable("controlify.gui.gyro_look_sensitivity_x.tooltip"))
 						.build())
-				.binding(defaults.gyro.lookSensitivity, () -> settings.gyro.lookSensitivity, v -> settings.gyro.lookSensitivity = v)
+				.binding(defaults.gyro.lookSensitivityX, () -> settings.gyro.lookSensitivityX, v -> settings.gyro.lookSensitivityX = v)
 				.controller(opt -> FloatSliderControllerBuilder.create(opt)
-						.range(0f, 3f)
+						.range(0f, 5f)
 						.step(0.1f)
 						.formatValue(percentOrOffFormatter))
-				.addListener((opt, event) -> gyroOptions.forEach(o -> {
-					o.setAvailable(opt.pendingValue() > 0);
-					o.requestSetDefault();
-				}))
-				.build());
+				.build();
+		Option<Float> gyroSensitivityY = Option.<Float>createBuilder()
+				.name(Component.translatable("controlify.gui.gyro_look_sensitivity_y"))
+				.description(OptionDescription.createBuilder()
+						.text(Component.translatable("controlify.gui.gyro_look_sensitivity_y.tooltip"))
+						.build())
+				.binding(defaults.gyro.lookSensitivityY, () -> settings.gyro.lookSensitivityY, v -> settings.gyro.lookSensitivityY = v)
+				.controller(opt -> FloatSliderControllerBuilder.create(opt)
+						.range(0f, 5f)
+						.step(0.1f)
+						.formatValue(percentOrOffFormatter))
+				.build();
+		// Greying logic shared between the two axes — depend options become available iff at
+		// least one axis sensitivity > 0 (so disabling one axis doesn't disable everything else).
+		Runnable refreshGyroDeps = () -> {
+			boolean anyEnabled = gyroSensitivityX.pendingValue() > 0 || gyroSensitivityY.pendingValue() > 0;
+			gyroOptions.forEach(o -> o.setAvailable(anyEnabled));
+		};
+		gyroSensitivityX.addListener((opt, event) -> refreshGyroDeps.run());
+		gyroSensitivityY.addListener((opt, event) -> refreshGyroDeps.run());
+		gyroGroup.option(gyroSensitivityX);
+		gyroGroup.option(gyroSensitivityY);
 		var relativeModeOpt = Option.<Boolean>createBuilder()
 				.name(Component.translatable("controlify.gui.gyro_behaviour"))
 				.description(val -> OptionDescription.createBuilder()
@@ -984,7 +1003,7 @@ public class ControllerConfigScreenFactory {
 							.build())
 					.binding(defaults.gyro.buttonMode, () -> settings.gyro.buttonMode, v -> settings.gyro.buttonMode = v)
 					.controller(controllerOpt -> EnumControllerBuilder.create(controllerOpt).enumClass(GyroButtonMode.class))
-					.available(gyroSensitivity.pendingValue() > 0)
+					.available(gyroSensitivityX.pendingValue() > 0 || gyroSensitivityY.pendingValue() > 0)
 					.build();
 			gyroOptions.add(opt);
 			return opt;
@@ -997,7 +1016,7 @@ public class ControllerConfigScreenFactory {
 							.build())
 					.binding(defaults.gyro.flickStick, () -> settings.gyro.flickStick, v -> settings.gyro.flickStick = v)
 					.controller(TickBoxControllerBuilder::create)
-					.available(gyroSensitivity.pendingValue() > 0)
+					.available(gyroSensitivityX.pendingValue() > 0 || gyroSensitivityY.pendingValue() > 0)
 					.build();
 			gyroOptions.add(opt);
 			return opt;
