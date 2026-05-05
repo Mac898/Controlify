@@ -279,7 +279,7 @@ public class InGameInputHandler {
         Vector2d lookImpulse = new Vector2d();
         controller.gyro().ifPresent(gyro -> handleGyroLook(gyro, lookImpulse, aiming));
 
-        if (controller.gyro().map(gyro -> gyro.settings().lookSensitivity > 0 && gyro.settings().flickStick).orElse(false)) {
+        if (controller.gyro().map(gyro -> gyro.settings().maxLookSensitivity() > 0 && gyro.settings().flickStick).orElse(false)) {
             handleFlickStick(player);
         } else {
             controller.input().ifPresent(input -> handleRegularLook(input, lookImpulse, aiming, player));
@@ -364,11 +364,13 @@ public class InGameInputHandler {
            gyroToggledOn = !gyroToggledOn;
         }
 
-        // convert radians per second into degrees per tick
+        // convert radians per second into degrees per tick. Per-axis sensitivity: GyroState's
+        // components are (pitch=x, yaw=y, roll=z), so the multiplier is (Y-sens, X-sens, X-sens)
+        // — Y-sensitivity scales pitch (vertical), X-sensitivity scales yaw + roll (horizontal).
         GyroState thisInput = new GyroState(gyroInput)
                 .mul(Mth.RAD_TO_DEG)
                 .div(20)
-                .mul(settings.lookSensitivity);
+                .mul(new org.joml.Vector3f(settings.lookSensitivityY, settings.lookSensitivityX, settings.lookSensitivityX));
 
         impulse.y += -thisInput.pitch() * (settings.invertPitch ? -1 : 1);
         impulse.x += switch (settings.yawMode) {

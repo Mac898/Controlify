@@ -1,13 +1,14 @@
 package dev.isxander.controlify.config.settings.profile;
 
-import dev.isxander.controlify.config.dto.device.GyroCalibrationConfig;
 import dev.isxander.controlify.config.dto.profile.GyroConfig;
 import dev.isxander.controlify.controller.gyro.GyroButtonMode;
-import dev.isxander.controlify.controller.gyro.GyroStateC;
 import dev.isxander.controlify.controller.gyro.GyroYawMode;
 
 public class GyroSettings {
-    public float lookSensitivity;
+    /** Yaw (horizontal) sensitivity multiplier. UI slider 0..5 (0..500%). */
+    public float lookSensitivityX;
+    /** Pitch (vertical) sensitivity multiplier. UI slider 0..5 (0..500%). */
+    public float lookSensitivityY;
     public boolean relativeMode;
     public boolean invertPitch;
     public boolean invertYaw;
@@ -16,7 +17,8 @@ public class GyroSettings {
     public boolean flickStick;
 
     public GyroSettings(
-            float lookSensitivity,
+            float lookSensitivityX,
+            float lookSensitivityY,
             boolean relativeMode,
             boolean invertPitch,
             boolean invertYaw,
@@ -24,7 +26,8 @@ public class GyroSettings {
             GyroYawMode yawMode,
             boolean flickStick
     ) {
-        this.lookSensitivity = lookSensitivity;
+        this.lookSensitivityX = lookSensitivityX;
+        this.lookSensitivityY = lookSensitivityY;
         this.relativeMode = relativeMode;
         this.invertPitch = invertPitch;
         this.invertYaw = invertYaw;
@@ -35,7 +38,8 @@ public class GyroSettings {
 
     public static GyroSettings fromDTO(GyroConfig dto) {
         return new GyroSettings(
-                dto.lookSensitivity(),
+                dto.lookSensitivityX(),
+                dto.lookSensitivityY(),
                 dto.relativeMode(),
                 dto.invertPitch(),
                 dto.invertYaw(),
@@ -47,7 +51,8 @@ public class GyroSettings {
 
     public GyroConfig toDTO() {
         return new GyroConfig(
-                lookSensitivity,
+                lookSensitivityX,
+                lookSensitivityY,
                 relativeMode,
                 invertPitch,
                 invertYaw,
@@ -55,5 +60,11 @@ public class GyroSettings {
                 yawMode,
                 flickStick
         );
+    }
+
+    /** Highest of the two axis sensitivities — used by call sites that gate on "any sensitivity
+     *  &gt; 0" (e.g. the flick-stick guard, which should engage if either axis is enabled). */
+    public float maxLookSensitivity() {
+        return Math.max(lookSensitivityX, lookSensitivityY);
     }
 }

@@ -226,8 +226,11 @@ public final class TheHolyMigrationFix extends DataFix {
         var defaults = controllerDefaults.gyro;
 
         return root.createMap(Map.of(
+                // Carry over the old single-axis sensitivity into the new format under the
+                // legacy key. The new GyroConfig codec accepts {@code look_sensitivity} as a
+                // fallback and seeds both X and Y from it, so old configs continue to work.
                 root.createString("look_sensitivity"), old.get("look_sensitivity")
-                        .result().orElse(root.createFloat(defaults.lookSensitivity)),
+                        .result().orElse(root.createFloat(defaults.maxLookSensitivity())),
                 root.createString("relative_mode"), old.get("relative_gyro_mode")
                         .result().orElse(root.createBoolean(defaults.relativeMode)),
                 root.createString("invert_pitch"), old.get("invert_y")
