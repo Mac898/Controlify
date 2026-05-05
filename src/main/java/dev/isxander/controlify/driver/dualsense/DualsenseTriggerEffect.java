@@ -10,6 +10,8 @@ import org.apache.commons.lang3.Validate;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Range;
 
+import java.util.Arrays;
+
 public sealed interface DualsenseTriggerEffect {
 	DualsenseEffectsState.TriggerEffect createState();
 
@@ -205,6 +207,17 @@ public sealed interface DualsenseTriggerEffect {
 				return DualsenseEffectsState.TriggerEffect.OFF;
 			}
 		}
+
+		// Records compare arrays by reference by default; use content equality so the dispatcher can dedup.
+		@Override
+		public boolean equals(Object obj) {
+			return obj instanceof FeedbackMultiplePosition other && Arrays.equals(this.strength, other.strength);
+		}
+
+		@Override
+		public int hashCode() {
+			return Arrays.hashCode(this.strength);
+		}
 	}
 
 	/**
@@ -302,6 +315,142 @@ public sealed interface DualsenseTriggerEffect {
 			}
 
 			return DualsenseEffectsState.TriggerEffect.OFF;
+		}
+
+		// Records compare arrays by reference by default; use content equality so the dispatcher can dedup.
+		@Override
+		public boolean equals(Object obj) {
+			return obj instanceof VibrationMultiplePosition other
+					&& this.frequency == other.frequency
+					&& Arrays.equals(this.amplitude, other.amplitude);
+		}
+
+		@Override
+		public int hashCode() {
+			return 31 * Byte.hashCode(this.frequency) + Arrays.hashCode(this.amplitude);
+		}
+	}
+
+	/**
+	 * Trigger emulates a bow draw — tension grows between the start and end positions, snapping free on release.
+	 * This is an unofficial effect left in the firmware and may be removed in a future DualSense update.
+	 *
+	 * @param startPosition The zone where bow tension begins to build. Must be between 1 and 8 inclusive.
+	 * @param endPosition The zone where bow tension peaks. Must be between start+1 and 8 inclusive.
+	 * @param strength The bow draw resistance. Must be between 0 and 8 inclusive.
+	 * @param snapForce The force of the snap when the trigger releases past the end position. Must be between 0 and 8 inclusive.
+	 */
+	record Bow(
+			@Range(from = 1, to = 8) byte startPosition,
+			@Range(from = 1+1, to = 8) byte endPosition,
+			@Range(from = 0, to = 8) byte strength,
+			@Range(from = 0, to = 8) byte snapForce
+	) implements DualsenseTriggerEffect {
+		public Bow {
+			Validate.inclusiveBetween(1, 8, startPosition, "Start position must be between 1 and 8 inclusive");
+			Validate.inclusiveBetween(startPosition+1, 8, endPosition, "End position must be between start+1 and 8 inclusive");
+			Validate.inclusiveBetween(0, 8, strength, "Strength must be between 0 and 8 inclusive");
+			Validate.inclusiveBetween(0, 8, snapForce, "Snap force must be between 0 and 8 inclusive");
+			Validate.isTrue(startPosition < endPosition, "Start position must be less than end position");
+		}
+
+		@Override
+		public DualsenseEffectsState.TriggerEffect createState() {
+			if (strength == 0 || snapForce == 0) {
+				return DualsenseEffectsState.TriggerEffect.OFF;
+			}
+
+			int zoneBitmap = (1 << startPosition) | (1 << endPosition);
+			return new DualsenseEffectsState.TriggerEffect(DualsenseTriggerEffectTypes.BOW, new byte[]{
+					(byte) (zoneBitmap & 0xff),
+					(byte) ((zoneBitmap >> 8) & 0xff),
+					(byte) ((snapForce & 0x0f) | ((strength & 0x0f) << 4)),
+			});
+		}
+	}
+
+	/**
+	 * Trigger emulates a galloping rhythm — two stomp pulses inside a zone band at a given frequency.
+	 * This is an unofficial effect left in the firmware and may be removed in a future DualSense update.
+	 *
+	 * @param startPosition The starting zone of the galloping band. Must be between 0 and 8 inclusive.
+	 * @param endPosition The ending zone of the galloping band. Must be between start+1 and 9 inclusive.
+	 * @param firstFoot Strength of the first hoof beat. Must be between 0 and 15 inclusive.
+	 * @param secondFoot Strength of the second hoof beat. Must be between 0 and 15 inclusive.
+	 * @param frequency Gallop frequency in hertz. Effect turns off when zero.
+	 */
+	record Galloping(
+			@Range(from = 0, to = 8) byte startPosition,
+			@Range(from = 0+1, to = 9) byte endPosition,
+			@Range(from = 0, to = 15) byte firstFoot,
+			@Range(from = 0, to = 15) byte secondFoot,
+			byte frequency
+	) implements DualsenseTriggerEffect {
+		public Galloping {
+			Validate.inclusiveBetween(0, 8, startPosition, "Start position must be between 0 and 8 inclusive");
+			Validate.inclusiveBetween(startPosition+1, 9, endPosition, "End position must be between start+1 and 9 inclusive");
+			Validate.inclusiveBetween(0, 15, firstFoot, "First foot must be between 0 and 15 inclusive");
+			Validate.inclusiveBetween(0, 15, secondFoot, "Second foot must be between 0 and 15 inclusive");
+			Validate.isTrue(startPosition < endPosition, "Start position must be less than end position");
+		}
+
+		@Override
+		public DualsenseEffectsState.TriggerEffect createState() {
+			if (frequency == 0) {
+				return DualsenseEffectsState.TriggerEffect.OFF;
+			}
+
+			int zoneBitmap = (1 << startPosition) | (1 << endPosition);
+			return new DualsenseEffectsState.TriggerEffect(DualsenseTriggerEffectTypes.GALLOPING, new byte[]{
+					(byte) (zoneBitmap & 0xff),
+					(byte) ((zoneBitmap >> 8) & 0xff),
+					(byte) ((secondFoot & 0x0f) | ((firstFoot & 0x0f) << 4)),
+					frequency,
+			});
+		}
+	}
+
+	/**
+	 * Trigger emulates machine motion — alternating amplitudes at a fixed frequency over a period.
+	 * This is an unofficial effect left in the firmware and may be removed in a future DualSense update.
+	 *
+	 * @param startPosition The starting zone of the machine band. Must be between 0 and 8 inclusive.
+	 * @param endPosition The ending zone of the machine band. Must be between start+1 and 9 inclusive.
+	 * @param amplitudeA First amplitude. Must be between 0 and 7 inclusive.
+	 * @param amplitudeB Second amplitude. Must be between 0 and 7 inclusive.
+	 * @param frequency Vibration frequency. Effect turns off when zero.
+	 * @param period Period between amplitude transitions.
+	 */
+	record Machine(
+			@Range(from = 0, to = 8) byte startPosition,
+			@Range(from = 0+1, to = 9) byte endPosition,
+			@Range(from = 0, to = 7) byte amplitudeA,
+			@Range(from = 0, to = 7) byte amplitudeB,
+			byte frequency,
+			byte period
+	) implements DualsenseTriggerEffect {
+		public Machine {
+			Validate.inclusiveBetween(0, 8, startPosition, "Start position must be between 0 and 8 inclusive");
+			Validate.inclusiveBetween(startPosition+1, 9, endPosition, "End position must be between start+1 and 9 inclusive");
+			Validate.inclusiveBetween(0, 7, amplitudeA, "Amplitude A must be between 0 and 7 inclusive");
+			Validate.inclusiveBetween(0, 7, amplitudeB, "Amplitude B must be between 0 and 7 inclusive");
+			Validate.isTrue(startPosition < endPosition, "Start position must be less than end position");
+		}
+
+		@Override
+		public DualsenseEffectsState.TriggerEffect createState() {
+			if (frequency == 0) {
+				return DualsenseEffectsState.TriggerEffect.OFF;
+			}
+
+			int zoneBitmap = (1 << startPosition) | (1 << endPosition);
+			return new DualsenseEffectsState.TriggerEffect(DualsenseTriggerEffectTypes.MACHINE, new byte[]{
+					(byte) (zoneBitmap & 0xff),
+					(byte) ((zoneBitmap >> 8) & 0xff),
+					(byte) ((amplitudeB & 0x0f) | ((amplitudeA & 0x0f) << 4)),
+					frequency,
+					period,
+			});
 		}
 	}
 }

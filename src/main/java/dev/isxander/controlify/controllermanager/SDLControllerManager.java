@@ -162,6 +162,15 @@ public class SDLControllerManager extends AbstractControllerManager {
 
 		controllerLogger.debugLog("Unique Controller ID: {}", info.ucid());
 
+		// Diagnostic for adaptive-trigger gating: print the loaded settings once on connect.
+		controller.dualSense().ifPresent(ds -> controllerLogger.log(
+				"[AdaptiveTrigger] Settings on connect — triggerEffects={}, multiplier={}, categoryToggles={}, support.triggerEffects={}",
+				controller.settings().dualsense.triggerEffects,
+				controller.settings().dualsense.triggerStrengthMultiplier,
+				controller.settings().dualsense.triggerCategoryToggles,
+				ds.support().triggerEffects()
+		));
+
 		this.addController(ucid, controller);
 		return Optional.of(controller);
 	}
