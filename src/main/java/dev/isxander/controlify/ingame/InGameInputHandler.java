@@ -64,6 +64,13 @@ public class InGameInputHandler {
 	private boolean gyroToggledOn;
 	private boolean wasAiming;
 	private Animation flickAnimation;
+	/** Whether the user is currently holding the look-stick deflected past the flick threshold.
+	 *  While true we track stick rotation and apply it as continuous yaw rotation; the initial
+	 *  snap-turn fires on the rising edge (idle → flicking). */
+	private boolean flickInProgress;
+	/** Stick angle (degrees, world-yaw convention) recorded the previous tick, used to compute
+	 *  the per-tick rotation delta during the holding phase. */
+	private float prevFlickAngleDeg;
 
 	private boolean shouldShowPlayerList;
 
@@ -447,30 +454,59 @@ public class InGameInputHandler {
 		} * (settings.invertYaw ? -1 : 1);
 	}
 
+	/** Threshold the stick magnitude has to cross (from below) to start a new flick. Set high
+	 *  so the user has fully committed the flick by the time we sample the angle — the previous
+	 *  per-axis {@code justPressed} trigger fired the moment a single cardinal crossed 0.5,
+	 *  which captured the angle mid-flick and produced cardinal/diagonal-only turns. */
+	private static final float FLICK_TRIGGER_MAGNITUDE = 0.85f;
+	/** Hysteresis floor: stick magnitude must drop below this to re-arm a future flick. */
+	private static final float FLICK_RELEASE_MAGNITUDE = 0.5f;
+
 	protected void handleFlickStick(LocalPlayer player) {
-		float y = ControlifyBindings.LOOK_DOWN.on(controller).analogueNow()
-				- ControlifyBindings.LOOK_UP.on(controller).analogueNow();
-		float x = ControlifyBindings.LOOK_RIGHT.on(controller).analogueNow()
-				- ControlifyBindings.LOOK_LEFT.on(controller).analogueNow();
+		float right = ControlifyBindings.LOOK_RIGHT.on(controller).analogueNow();
+		float left = ControlifyBindings.LOOK_LEFT.on(controller).analogueNow();
+		float up = ControlifyBindings.LOOK_UP.on(controller).analogueNow();
+		float down = ControlifyBindings.LOOK_DOWN.on(controller).analogueNow();
 
-		float flickAngle = Mth.wrapDegrees((float) Mth.atan2(y, x) * Mth.RAD_TO_DEG + 90f);
+		float x = right - left;
+		float y = down - up;
+		float magnitude = (float) Math.sqrt(x * x + y * y);
 
-		if (!ControlifyBindings.LOOK_DOWN.on(controller).justPressed()
-				&& !ControlifyBindings.LOOK_UP.on(controller).justPressed()
-				&& !ControlifyBindings.LOOK_LEFT.on(controller).justPressed()
-				&& !ControlifyBindings.LOOK_RIGHT.on(controller).justPressed()
-		) {
-			return;
+		if (!flickInProgress) {
+			// Idle: wait for the stick to be fully deflected, then snap-turn to the deflection
+			// angle. Using magnitude (not per-axis justPressed) means we read the angle when the
+			// stick is at peak deflection, giving a true analogue turn instead of cardinal/
+			// diagonal snapping.
+			if (magnitude >= FLICK_TRIGGER_MAGNITUDE) {
+				float flickAngle = Mth.wrapDegrees((float) Mth.atan2(y, x) * Mth.RAD_TO_DEG + 90f);
+
+				if (flickAnimation != null && flickAnimation.isPlaying()) {
+					flickAnimation.skipToEnd();
+				}
+				flickAnimation = Animation.of(8)
+						.easing(EasingFunction.EASE_OUT_EXPO)
+						.deltaConsumerD(angle -> player.turn(angle, 0), 0, flickAngle / 0.15)
+						.play();
+
+				prevFlickAngleDeg = flickAngle;
+				flickInProgress = true;
+			}
+		} else {
+			// Holding: continuous rotation tracking. Each tick the stick is still deflected,
+			// measure the delta from the previous tick's angle and turn the camera by the same
+			// amount. This is Jibb Smart's "Flick Stick rotation phase" — fine post-flick aim.
+			if (magnitude < FLICK_RELEASE_MAGNITUDE) {
+				flickInProgress = false;
+				return;
+			}
+			float currentAngle = Mth.wrapDegrees((float) Mth.atan2(y, x) * Mth.RAD_TO_DEG + 90f);
+			float deltaAngle = Mth.wrapDegrees(currentAngle - prevFlickAngleDeg);
+			prevFlickAngleDeg = currentAngle;
+			// Tiny noise threshold so a perfectly held stick doesn't drift the camera.
+			if (Math.abs(deltaAngle) > 0.05f) {
+				player.turn(deltaAngle / 0.15, 0);
+			}
 		}
-
-		if (flickAnimation != null && flickAnimation.isPlaying()) {
-			flickAnimation.skipToEnd();
-		}
-
-		flickAnimation = Animation.of(8)
-				.easing(EasingFunction.EASE_OUT_EXPO)
-				.deltaConsumerD(angle -> player.turn(angle, 0), 0, flickAngle / 0.15)
-				.play();
 	}
 
 	public void processPlayerLook(float deltaTime) {
