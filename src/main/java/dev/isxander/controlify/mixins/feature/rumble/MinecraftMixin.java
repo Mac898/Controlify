@@ -13,8 +13,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class MinecraftMixin {
     @Inject(method = "disconnect(Lnet/minecraft/client/gui/screens/Screen;Z)V", at = @At("HEAD"))
     private void clearRumbleEffects(CallbackInfo ci) {
-        ControlifyApi.get().getCurrentController()
-                .flatMap(ControllerEntity::rumble)
-                .ifPresent(controller -> controller.rumbleManager().clearEffects());
+        ControlifyApi.get().getCurrentController().ifPresent(controller -> {
+            controller.rumble().ifPresent(rumble -> rumble.rumbleManager().clearEffects());
+            controller.dualSense().ifPresent(ds -> ds.adaptiveTriggers().clearAll());
+            controller.hdHaptics().ifPresent(haptics -> haptics.dispatcher().clearAll());
+        });
     }
 }
