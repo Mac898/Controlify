@@ -9,6 +9,7 @@ import dev.isxander.controlify.controller.ControllerEntity;
 import dev.isxander.controlify.controller.battery.BatteryLevelComponent;
 import dev.isxander.controlify.controller.battery.PowerState;
 import dev.isxander.controlify.controller.dualsense.DualSenseComponent;
+import dev.isxander.controlify.controller.dualsense.DualSenseFeatureSupport;
 import dev.isxander.controlify.controller.haptic.CompleteSoundData;
 import dev.isxander.controlify.controller.haptic.HDHapticComponent;
 import dev.isxander.controlify.controller.id.ControllerType;
@@ -124,24 +125,33 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
             if (Util.getPlatform() != Util.OS.OSX && SDLNativesLoader.get().orElseThrow().hasAudio()) {
                 SDL_AudioDeviceID dualsenseAudioDev = null;
                 SDL_AudioSpec.ByReference devSpec = new SDL_AudioSpec.ByReference();
+                SDL_AudioDeviceID[] devices = SDL_GetAudioPlaybackDevices();
 
-                for (SDL_AudioDeviceID dev : SDL_GetAudioPlaybackDevices()) {
-                    String name = SDL_GetAudioDeviceName(dev).toLowerCase();
-                    if (name.contains("dualsense") || name.contains("ps5") || name.contains("wireless controller")) {
-                        SDL_GetAudioDeviceFormat(dev, devSpec, null);
-                        if (devSpec.channels == 4) {
-                            dualsenseAudioDev = dev;
-                            break;
-                        }
+                logger.log("DualSense HD Haptics: probing {} SDL audio playback device(s).", devices.length);
+                for (SDL_AudioDeviceID dev : devices) {
+                    String name = SDL_GetAudioDeviceName(dev);
+                    SDL_AudioSpec.ByReference probeSpec = new SDL_AudioSpec.ByReference();
+                    SDL_GetAudioDeviceFormat(dev, probeSpec, null);
+                    logger.log("DualSense HD Haptics: device='{}' channels={} freq={} fmt={}",
+                            name, probeSpec.channels, probeSpec.freq, probeSpec.format);
+
+                    String lower = name.toLowerCase();
+                    if ((lower.contains("dualsense") || lower.contains("ps5") || lower.contains("wireless controller"))
+                            && probeSpec.channels == 4) {
+                        dualsenseAudioDev = dev;
+                        devSpec.channels = probeSpec.channels;
+                        devSpec.freq = probeSpec.freq;
+                        devSpec.format = probeSpec.format;
+                        break;
                     }
                 }
 
                 if (dualsenseAudioDev != null) {
-                    logger.debugLog("DualSense HD Haptics audio device found.");
+                    logger.log("DualSense HD Haptics audio device found.");
                     this.dualsenseAudioSpec = devSpec;
                     this.dualsenseAudioDev = SDL_OpenAudioDevice(dualsenseAudioDev, (SDL_AudioSpec.ByReference) this.dualsenseAudioSpec);
                 } else {
-                    logger.debugLog("DualSense HD Haptics audio device not found.");
+                    logger.log("DualSense HD Haptics audio device not found (no 4-channel match in the list above).");
                 }
             }
         } else {
@@ -166,7 +176,14 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
             controller.setComponent(this.ledComponent = new LEDComponent(1));
         }
         if (this.isDualsense) {
-            controller.setComponent(this.dualSenseComponent = new DualSenseComponent());
+            DualSenseFeatureSupport support = new DualSenseFeatureSupport(
+                    true,
+                    this.dualsenseAudioDev != null,
+                    true,
+                    this.dualsenseAudioDev != null,
+                    isBluetooth()
+            );
+            controller.setComponent(this.dualSenseComponent = new DualSenseComponent(support));
         }
         if (this.dualsenseAudioDev != null) {
             controller.setComponent(this.hdHapticComponent = new HDHapticComponent());
@@ -213,11 +230,17 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
         if (isRumbleSupported) {
             Optional<RumbleState> stateOpt = this.rumbleComponent.consumeRumble();
 
-            stateOpt.ifPresent(state -> {
-                if (!SDL_RumbleController(ptrController, state.strong(), state.weak(), 5000)) {
-                    CUtil.LOGGER.error("Could not rumble gamepad: {}", SDL_GetError());
-                }
-            });
+            // On a DualSense, the voice-coil actuators that produce HD haptics are the same
+            // hardware that produces rumble. Sending both simultaneously superimposes them and
+            // feels muddy. When HD haptics is enabled and the user hasn't disabled the suppress
+            // toggle, drop the rumble call (state is already consumed so it won't accumulate).
+            if (!shouldSuppressRumble()) {
+                stateOpt.ifPresent(state -> {
+                    if (!SDL_RumbleController(ptrController, state.strong(), state.weak(), 5000)) {
+                        CUtil.LOGGER.error("Could not rumble gamepad: {}", SDL_GetError());
+                    }
+                });
+            }
         }
 
         if (isTriggerRumbleSupported) {
@@ -267,30 +290,64 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
 
     private void updateDualSense() {
         if (dualSenseComponent == null) return;
+        if (!this.dualSenseComponent.consumeDirty()) return;
 
         DS5EffectsState.ByValue effectsState = new DS5EffectsState.ByValue();
 
-        if (this.dualSenseComponent.consumeDirty()) {
-            // Left Trigger Effect
-            Optional.ofNullable(this.dualSenseComponent.getLeftTriggerEffect()).ifPresent(effect -> {
-                effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_LEFT_TRIGGER_FFB;
-                effectsState.rgucLeftTriggerEffect = effect.createState();
-            });
+        Optional.ofNullable(this.dualSenseComponent.getLeftTriggerEffect()).ifPresent(effect -> {
+            effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_LEFT_TRIGGER_FFB;
+            effectsState.rgucLeftTriggerEffect = effect.createState();
+        });
 
-            // Right Trigger Effect
-            Optional.ofNullable(this.dualSenseComponent.getRightTriggerEffect()).ifPresent(effect -> {
-                effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_RIGHT_TRIGGER_FFB;
-                effectsState.rgucRightTriggerEffect = effect.createState();
-            });
+        Optional.ofNullable(this.dualSenseComponent.getRightTriggerEffect()).ifPresent(effect -> {
+            effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_RIGHT_TRIGGER_FFB;
+            effectsState.rgucRightTriggerEffect = effect.createState();
+        });
 
-            // Mute Light
+        DualSenseComponent.MuteLightMode muteMode = this.dualSenseComponent.getMuteLightMode();
+        if (muteMode != null) {
             effectsState.ucEnableBits2 |= DS5EffectsState.EnableBitFlags2.ALLOW_MUTE_LIGHT;
-            effectsState.ucMicLightMode = DS5EffectsState.MuteLightState.fromBoolean(this.dualSenseComponent.getMuteLight());
-
-            effectsState.write();
-
-            SDL_SendControllerEffect(ptrController, effectsState.getPointer(), Native.getNativeSize(DS5EffectsState.ByValue.class));
+            effectsState.ucMicLightMode = muteMode.toJnaValue();
         }
+
+        int playerMask = this.dualSenseComponent.getPlayerIndicatorMask();
+        if (playerMask >= 0) {
+            effectsState.ucEnableBits2 |= DS5EffectsState.EnableBitFlags2.ALLOW_PLAYER_INDICATORS;
+            effectsState.ucPadLights = (byte) playerMask;
+            effectsState.ucLedBrightness = this.dualSenseComponent.getPlayerIndicatorBrightness();
+        }
+
+        if (this.dualSenseComponent.hasAudioMuteState()) {
+            effectsState.ucEnableBits2 |= DS5EffectsState.EnableBitFlags2.ALLOW_AUDIO_MUTE;
+            byte muteBits = 0;
+            if (this.dualSenseComponent.isMicMuted()) muteBits |= 0x1;
+            if (this.dualSenseComponent.isSpeakerMuted()) muteBits |= 0x2;
+            effectsState.ucAudioMuteBits = muteBits;
+        }
+
+        int speakerVol = this.dualSenseComponent.getSpeakerVolume();
+        if (speakerVol >= 0) {
+            effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_SPEAKER_VOLUME;
+            effectsState.ucSpeakerVolume = (byte) (0x3D + Math.round((speakerVol / 100.0f) * (0x64 - 0x3D)));
+        }
+
+        int headphoneVol = this.dualSenseComponent.getHeadphoneVolume();
+        if (headphoneVol >= 0) {
+            effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_HEADPHONE_VOLUME;
+            effectsState.ucHeadphoneVolume = (byte) Math.round((headphoneVol / 100.0f) * 0x7F);
+        }
+
+        if (this.dualSenseComponent.isHapticLowPass()) {
+            effectsState.ucEnableBits2 |= DS5EffectsState.EnableBitFlags2.ALLOW_HAPTIC_LOW_PASS;
+        }
+
+        if (this.dualSenseComponent.consumeResetLights()) {
+            effectsState.ucEnableBits2 |= DS5EffectsState.EnableBitFlags2.RESET_LIGHTS;
+        }
+
+        effectsState.write();
+
+        SDL_SendControllerEffect(ptrController, effectsState.getPointer(), Native.getNativeSize(DS5EffectsState.ByValue.class));
     }
 
     private void updateHDHaptic() {
@@ -306,6 +363,7 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
     }
 
     private void playHaptic(CompleteSoundData sound) {
+        if (sound == null) return;
         if (ptrController == null || dualsenseAudioDev == null || dualsenseAudioSpec == null) {
             return;
         }
@@ -345,7 +403,15 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
                 break;
             }
         }
-        int length = sound.audio().length / spec.freq / spec.channels / byteSs * 20;
+        // Multiply before dividing so short audio (< 1 tick of total throughput) doesn't truncate
+        // to 0 ticks. With the bad floor, isInUse() flipped to false right after queueing — so
+        // rapid one-shots queued onto the same stream sequentially instead of spawning parallel
+        // streams, breaking additive playback (e.g. rapid note-block clicks).
+        int byteRate = spec.freq * spec.channels * byteSs;
+        int length = byteRate <= 0
+                ? 0
+                : (int) Math.ceil((double) (sound.audio().length * 20L) / byteRate);
+        length = Math.max(1, length);
 
         if (handle != null) {
             handle.queueAudio(sound.audio(), length);
@@ -406,6 +472,18 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
         return connectionState == SDLJoystickConnectionState.WIRELESS;
     }
 
+    /**
+     * True when the simple rumble path should be skipped because HD haptics is rendering on the
+     * same physical hardware (DualSense voice coils). Only applies when HD haptics is actually
+     * available and active for this controller — it never turns off rumble for non-DualSense
+     * controllers, which would have nothing else to fall back to.
+     */
+    private boolean shouldSuppressRumble() {
+        if (hdHapticComponent == null) return false;
+        var settings = hdHapticComponent.settings();
+        return settings.enabled && settings.suppressRumble;
+    }
+
     protected abstract SDL_PropertiesID SDL_GetControllerProperties(SDL_Controller ptrController);
     protected abstract String SDL_GetControllerName(SDL_Controller ptrController);
     protected abstract SDL_JoystickGUID SDL_GetControllerGUIDForID(SDL_JoystickID jid);
@@ -440,16 +518,22 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
         private int streamLastPlayed;
         private final SDL_AudioStream stream;
         private final SDL_AudioSpec spec;
+        private final int[] channelMap;
 
-        private AudioStreamHandle(SDL_AudioStream stream, SDL_AudioSpec spec) {
+        private AudioStreamHandle(SDL_AudioStream stream, SDL_AudioSpec spec, int[] channelMap) {
             this.stream = stream;
             this.spec = spec;
+            this.channelMap = channelMap;
             this.streamLastPlayed = 0;
         }
 
         public void queueAudio(byte[] audio, int tickLength) {
             try (Memory memory = new Memory(audio.length)) {
                 memory.write(0, audio, 0, audio.length);
+                // Re-apply the output channel map before every queue. SDL3 has been observed to drop it
+                // after the stream's queue drains; without this, mono haptic data spills onto the
+                // controller speaker (channels 0/1) on the next reuse.
+                SDL_SetAudioStreamOutputChannelMap(stream, channelMap);
                 SDL_PutAudioStreamData(stream, memory, audio.length);
 
                 streamLastPlayed = Math.min(0, streamLastPlayed);
@@ -487,11 +571,8 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
                 case 2 -> new int[]{ -1, -1, 0, 1 };
                 default -> throw new IllegalStateException("Unsupported channel count " + audioSpec.channels);
             };
-            if (!SDL_SetAudioStreamOutputChannelMap(stream, channelMap)) {
-                System.out.println(SDL_GetError());
-            }
 
-            var handle = new AudioStreamHandle(stream, audioSpec);
+            var handle = new AudioStreamHandle(stream, audioSpec, channelMap);
             handle.queueAudio(audio, tickLength);
             return handle;
         }

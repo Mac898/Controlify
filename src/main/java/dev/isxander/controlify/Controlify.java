@@ -241,6 +241,9 @@ public class Controlify implements ControlifyApi {
 
         ControlifyBindings.registerModdedBindings();
 
+        // Register the default sound→haptic mappings (footsteps, instruments, attacks, block actions).
+        dev.isxander.controlify.controller.haptic.HapticSoundDefaults.registerAll();
+
         PlatformClientUtil.registerPostScreenRender((screen, graphics, mouseX, mouseY, tickDelta) ->
                 ControlifyApi.get().getCurrentController().ifPresent(controller -> {
                     virtualMouseHandler().renderVirtualMouse(graphics);
@@ -445,6 +448,20 @@ public class Controlify implements ControlifyApi {
         this.thisTickContexts = BindContext.CONTEXTS.values().stream()
                 .filter(ctx -> ctx.isApplicable().apply(minecraft))
                 .collect(Collectors.toUnmodifiableSet());
+
+        // Resolve dispatcher state for the active controller before the driver flush below,
+        // so any effects pushed by the dispatchers reach the controller on this tick.
+        getCurrentController().ifPresent(controller -> {
+            controller.dualSense().ifPresent(ds -> {
+                controller.hdHaptics().ifPresent(haptics -> ds.setHapticLowPass(haptics.settings().lowPassFilter));
+                ds.triggerTickHandler().tick();
+                ds.adaptiveTriggers().tick();
+            });
+            controller.hdHaptics().ifPresent(haptics -> {
+                haptics.tickHandler().tick();
+                haptics.dispatcher().tick();
+            });
+        });
 
         // handles updating state of all controllers
         controllerManager.tick(outOfFocus);

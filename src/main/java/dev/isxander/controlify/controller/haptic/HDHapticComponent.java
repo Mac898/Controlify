@@ -27,6 +27,8 @@ public class HDHapticComponent extends ECSComponentImpl {
 
     private Consumer<CompleteSoundData> playHapticConsumer;
     private final RandomSource randomSource;
+    private final HDHapticDispatcher dispatcher;
+    private final HDHapticTickHandler tickHandler;
 
     // the existing sound buffer library in the sound engine works on a ResourceProvider for registered sounds only
     // haptics are not sounds.
@@ -35,13 +37,25 @@ public class HDHapticComponent extends ECSComponentImpl {
 
     public HDHapticComponent() {
         this.randomSource = RandomSource.create();
+        this.dispatcher = new HDHapticDispatcher(this);
+        this.tickHandler = new HDHapticTickHandler(this);
+    }
+
+    public HDHapticDispatcher dispatcher() {
+        return this.dispatcher;
+    }
+
+    public HDHapticTickHandler tickHandler() {
+        return this.tickHandler;
     }
 
     public void playHaptic(Identifier haptic) {
         if (!settings().enabled || playHapticConsumer == null) return;
 
         getSoundData(haptic,  hapticBufferLibrary.getCompleteBuffer(haptic))
-                .thenAccept(playHapticConsumer)
+                .thenAccept(data -> {
+                    if (data != null) playHapticConsumer.accept(data);
+                })
                 .exceptionally(throwable -> {
                     throwable.printStackTrace();
                     return null;
@@ -49,9 +63,21 @@ public class HDHapticComponent extends ECSComponentImpl {
     }
 
     public void playHaptic(SoundEvent sound) {
-        Identifier location = Minecraft.getInstance().getSoundManager()
-                .getSoundEvent(sound.location())
-                .getSound(randomSource).getLocation();
+        playHaptic(sound, 1f);
+    }
+
+    /** Play a vanilla SoundEvent's OGG content at a per-call gain — used by the dispatcher's
+     *  passthrough path so distance attenuation actually scales amplitude (previously the gain
+     *  was computed but ignored, making the spatial range a hard gate rather than a falloff). */
+    public void playHaptic(SoundEvent sound, float gain) {
+        if (!settings().enabled || playHapticConsumer == null) return;
+        if (gain <= 0.001f) return;
+
+        var resolved = Minecraft.getInstance().getSoundManager().getSoundEvent(sound.location());
+        if (resolved == null) return;
+        var picked = resolved.getSound(randomSource);
+        if (picked == null) return;
+        Identifier location = picked.getLocation();
 
         SoundManager soundManager = Minecraft.getInstance().getSoundManager();
         SoundEngine soundEngine = ((SoundManagerAccessor) soundManager).getSoundEngine();
@@ -59,12 +85,42 @@ public class HDHapticComponent extends ECSComponentImpl {
 
         Identifier soundId = location.withPrefix("sounds/").withSuffix(".ogg");
 
+        final float finalGain = gain;
         getSoundData(soundId, bufferLibrary.getCompleteBuffer(soundId))
-                .thenAccept(playHapticConsumer)
+                .thenAccept(data -> {
+                    if (data == null) return;
+                    if (finalGain >= 0.999f) {
+                        playHapticConsumer.accept(data);
+                    } else {
+                        byte[] scaled = HapticWaveform.scaleSamples(data.audio(), finalGain);
+                        playHapticConsumer.accept(new CompleteSoundData(scaled, data.format()));
+                    }
+                })
                 .exceptionally(throwable -> {
                     throwable.printStackTrace();
                     return null;
                 });
+    }
+
+    public void playHaptic(byte[] pcm, AudioFormat format) {
+        playHaptic(pcm, format, 1f);
+    }
+
+    /** Play raw PCM at a per-call gain in [0,1] — used by the dispatcher to apply linear-falloff
+     *  distance attenuation. Gain ≥ 0.999 is treated as a no-op so the common case bypasses scaling. */
+    public void playHaptic(byte[] pcm, AudioFormat format, float gain) {
+        if (!settings().enabled || playHapticConsumer == null) return;
+        if (gain <= 0.001f) return;
+        byte[] scaled = gain >= 0.999f ? pcm : HapticWaveform.scaleSamples(pcm, gain);
+        playHapticConsumer.accept(new CompleteSoundData(scaled, format));
+    }
+
+    public void playHaptic(HapticWaveform waveform) {
+        playHaptic(waveform.pcm(), waveform.format(), 1f);
+    }
+
+    public void playHaptic(HapticWaveform waveform, float gain) {
+        playHaptic(waveform.pcm(), waveform.format(), gain);
     }
 
     public void acceptPlayHaptic(Consumer<CompleteSoundData> consumer) {
