@@ -10,6 +10,7 @@ import dev.isxander.controlify.Controlify;
 import dev.isxander.controlify.api.contextual.GuideVerbosity;
 import dev.isxander.controlify.bindings.BindContext;
 import dev.isxander.controlify.bindings.ControlifyBindApiImpl;
+import dev.isxander.controlify.bindings.ControlifyBindings;
 import dev.isxander.controlify.api.bind.InputBinding;
 import dev.isxander.controlify.api.bind.InputBindingSupplier;
 import dev.isxander.controlify.bindings.input.EmptyInput;
@@ -19,12 +20,21 @@ import dev.isxander.controlify.config.settings.profile.ProfileSettings;
 import dev.isxander.controlify.config.settings.profile.GenericControllerSettings;
 import dev.isxander.controlify.config.settings.profile.InputSettings;
 import dev.isxander.controlify.controller.*;
+import dev.isxander.controlify.controller.dualsense.AdaptiveTriggerDispatcher;
+import dev.isxander.controlify.controller.dualsense.AdaptiveTriggerHelper;
+import dev.isxander.controlify.controller.dualsense.DualsenseComponent;
+import dev.isxander.controlify.controller.dualsense.TriggerReason;
+import dev.isxander.controlify.controller.dualsense.TriggerSide;
 import dev.isxander.controlify.controller.gyro.GyroButtonMode;
 import dev.isxander.controlify.controller.gyro.GyroYawMode;
+import dev.isxander.controlify.controller.FeedbackCategory;
+import dev.isxander.controlify.controller.haptic.HDHapticComponent;
+import dev.isxander.controlify.controller.haptic.HapticWaveform;
 import dev.isxander.controlify.controller.input.DeadzoneGroup;
 import dev.isxander.controlify.controller.input.InputComponent;
 import dev.isxander.controlify.controller.input.Inputs;
 import dev.isxander.controlify.controller.rumble.RumbleComponent;
+import dev.isxander.controlify.driver.dualsense.DualsenseTriggerEffect;
 import dev.isxander.controlify.gui.controllers.BindController;
 import dev.isxander.controlify.gui.controllers.Deadzone2DImageRenderer;
 import dev.isxander.controlify.ingame.InputCurves;
@@ -54,6 +64,7 @@ import java.util.stream.Collectors;
 public class ControllerConfigScreenFactory {
 	private static final ValueFormatter<Float> percentFormatter = v -> Component.literal(String.format("%.0f%%", v*100));
 	private static final ValueFormatter<Float> percentOrOffFormatter = v -> v == 0 ? CommonComponents.OPTION_OFF : percentFormatter.format(v);
+	private static final ValueFormatter<Float> blocksFormatter = v -> Component.literal(String.format("%.0f blocks", v));
 	private static final Component newOptionLabel = Component.translatable("controlify.gui.new_options.label").withStyle(ChatFormatting.GOLD);
 	private static final ValueFormatter<Integer> ticksToMillisFormatter = v -> Component.literal(String.format("%03dms", v * 50));
 
@@ -479,9 +490,15 @@ public class ControllerConfigScreenFactory {
 		var builder = ConfigCategory.createBuilder()
 				.name(Component.translatable("controlify.config.category.advanced"));
 
-		makeVibrationGroup(settings, defaults, controller).ifPresent(builder::group);
+		// Vibration and HD-haptics groups share live cross-group wiring: vibration options grey
+		// out when HD haptics is enabled with suppressRumble on. Build the vibration group first
+		// and capture its option list, then have the HD haptics group's suppressRumble option
+		// listen for changes and update the vibration options accordingly.
+		var vibrationBuild = buildVibrationGroup(settings, defaults, controller);
+		vibrationBuild.group().ifPresent(builder::group);
+		makeHDHapticsGroup(settings, defaults, controller, vibrationBuild).ifPresent(builder::group);
+		makeAdaptiveTriggersGroup(settings, defaults, controller).ifPresent(builder::group);
 		makeGyroGroup(settings, defaults, controller).ifPresent(builder::group);
-		makeTriggerEffectsGroup(settings, defaults, controller).ifPresent(builder::group);
 		makeControllerMappingGroup(settings, defaults, controller).ifPresent(builder::group);
 
 		return builder.build();
@@ -518,7 +535,21 @@ public class ControllerConfigScreenFactory {
 				.build());
 	}
 
-	private Optional<OptionGroup> makeVibrationGroup(
+	/** Holder returned by {@link #buildVibrationGroup} so the HD haptics group can wire a
+	 *  cross-group "suppress rumble greys out vibration" listener. The {@code refreshSlot} is a
+	 *  one-element holder the HD haptics group fills with the actual refresh closure once both
+	 *  groups exist; vibration's own listener calls into it so a session-only suppressRumble
+	 *  toggle correctly invalidates the strength sliders without needing to apply config first.
+	 *  {@code dependentOptions} covers everything that should grey out together: per-source
+	 *  strength sliders + the Test Vibration button. */
+	private record VibrationGroupBuild(
+			Optional<OptionGroup> group,
+			Option<Boolean> allowVibrationOption,
+			List<Option<?>> dependentOptions,
+			Runnable[] refreshSlot
+	) {}
+
+	private VibrationGroupBuild buildVibrationGroup(
 			ProfileSettings settings,
 			ProfileSettings defaults,
 			Optional<ControllerEntity> controller
@@ -533,7 +564,10 @@ public class ControllerConfigScreenFactory {
 			vibrationGroup.option(LabelOption.create(notSupportedText(Component.translatable("controlify.gui.group.vibration"))));
 		}
 
-		List<Option<Float>> strengthOptions = new ArrayList<>();
+		List<Option<?>> dependentOptions = new ArrayList<>();
+		// Single-cell holder: HD haptics group fills this with the cross-group refresh closure
+		// after it builds. Until then the listener uses a no-op + saved-settings fallback.
+		Runnable[] refreshSlot = { () -> {} };
 		Option<Boolean> allowVibrationOption;
 		vibrationGroup.option(allowVibrationOption = Option.<Boolean>createBuilder()
 				.name(Component.translatable("controlify.gui.allow_vibrations"))
@@ -541,18 +575,7 @@ public class ControllerConfigScreenFactory {
 						.text(Component.translatable("controlify.gui.allow_vibrations.tooltip"))
 						.build())
 				.binding(defaults.rumble.enabled, () -> settings.rumble.enabled, v -> settings.rumble.enabled = v)
-				.addListener((opt, event) -> strengthOptions.forEach(so -> so.setAvailable(opt.pendingValue())))
-				.controller(TickBoxControllerBuilder::create)
-				.build());
-
-		boolean hdHapticsNotSupported = controller.isPresent() && controller.get().hdHaptics().isEmpty();
-		vibrationGroup.option(Option.<Boolean>createBuilder()
-				.name(Component.translatable("controlify.gui.hd_haptics"))
-				.description(OptionDescription.createBuilder()
-						.text(Component.translatable("controlify.gui.hd_haptics.tooltip"))
-						.text(hdHapticsNotSupported ? notSupportedText(Component.translatable("controlify.gui.hd_haptics")) : Component.empty())
-						.build())
-				.binding(defaults.hdHaptic.enabled, () -> settings.hdHaptic.enabled, v -> settings.hdHaptic.enabled = v)
+				.addListener((opt, event) -> refreshSlot[0].run())
 				.controller(TickBoxControllerBuilder::create)
 				.build());
 
@@ -571,16 +594,17 @@ public class ControllerConfigScreenFactory {
 							.range(0f, 2f)
 							.step(0.05f)
 							.formatValue(percentOrOffFormatter))
-					.available(allowVibrationOption.pendingValue())
+					.available(allowVibrationOption.pendingValue() && !isRumbleSuppressedByHD(settings))
 					.build();
-			strengthOptions.add(option);
+			dependentOptions.add(option);
 			vibrationGroup.option(option);
 		}
 		if (controller.isPresent() && controller.get().rumble().isPresent()) {
 			RumbleComponent rumble = controller.get().rumble().get();
-			vibrationGroup.option(ButtonOption.createBuilder()
+			var testButton = ButtonOption.createBuilder()
 					.name(Component.translatable("controlify.gui.test_vibration"))
 					.description(OptionDescription.of(Component.translatable("controlify.gui.test_vibration.tooltip")))
+					.available(allowVibrationOption.pendingValue() && !isRumbleSuppressedByHD(settings))
 					.action((screen, btn) -> {
 						rumble.rumbleManager().play(
 								RumbleSource.MASTER,
@@ -594,10 +618,279 @@ public class ControllerConfigScreenFactory {
 										.earlyFinish(BasicRumbleEffect.finishOnScreenChange())
 						);
 					})
+					.build();
+			dependentOptions.add(testButton);
+			vibrationGroup.option(testButton);
+		}
+
+		return new VibrationGroupBuild(Optional.of(vibrationGroup.build()), allowVibrationOption, dependentOptions, refreshSlot);
+	}
+
+	/** Returns true if HD haptics are enabled and configured to suppress rumble — read from
+	 *  saved settings, used at screen-open time before live cross-group wiring kicks in. */
+	private static boolean isRumbleSuppressedByHD(ProfileSettings settings) {
+		return settings.hdHaptic.enabled && settings.hdHaptic.suppressRumble;
+	}
+
+	private Optional<OptionGroup> makeHDHapticsGroup(
+			ProfileSettings settings,
+			ProfileSettings defaults,
+			Optional<ControllerEntity> controller,
+			VibrationGroupBuild vibrationBuild
+	) {
+		var group = OptionGroup.createBuilder()
+				.name(Component.translatable("controlify.gui.group.hd_haptics"))
+				.description(OptionDescription.createBuilder()
+						.text(Component.translatable("controlify.gui.group.hd_haptics.tooltip"))
+						.build());
+
+		boolean hdHapticsNotSupported = controller.isPresent() && controller.get().hdHaptics().isEmpty();
+		if (hdHapticsNotSupported) {
+			group.option(LabelOption.create(notSupportedText(Component.translatable("controlify.gui.group.hd_haptics"))));
+		}
+
+		List<Option<?>> dependentOptions = new ArrayList<>();
+		Option<Boolean> enabledOption = Option.<Boolean>createBuilder()
+				.name(Component.translatable("controlify.gui.hd_haptics"))
+				.description(OptionDescription.of(Component.translatable("controlify.gui.hd_haptics.tooltip")))
+				.binding(defaults.hdHaptic.enabled, () -> settings.hdHaptic.enabled, v -> settings.hdHaptic.enabled = v)
+				.addListener((opt, event) -> dependentOptions.forEach(o -> o.setAvailable(opt.pendingValue() && !hdHapticsNotSupported)))
+				.controller(TickBoxControllerBuilder::create)
+				.build();
+		group.option(enabledOption);
+
+		Option<Float> masterIntensity = Option.<Float>createBuilder()
+				.name(Component.translatable("controlify.gui.hd_haptics.master_intensity"))
+				.description(OptionDescription.of(Component.translatable("controlify.gui.hd_haptics.master_intensity.tooltip")))
+				.binding(defaults.hdHaptic.masterIntensity, () -> settings.hdHaptic.masterIntensity, v -> settings.hdHaptic.masterIntensity = v)
+				.controller(opt -> FloatSliderControllerBuilder.create(opt)
+						.range(0f, 2f)
+						.step(0.05f)
+						.formatValue(percentOrOffFormatter))
+				.available(enabledOption.pendingValue() && !hdHapticsNotSupported)
+				.build();
+		dependentOptions.add(masterIntensity);
+		group.option(masterIntensity);
+
+		Option<Float> synthesisIntensity = Option.<Float>createBuilder()
+				.name(Component.translatable("controlify.gui.hd_haptics.synthesis_intensity"))
+				.description(OptionDescription.of(Component.translatable("controlify.gui.hd_haptics.synthesis_intensity.tooltip")))
+				.binding(defaults.hdHaptic.synthesisIntensity, () -> settings.hdHaptic.synthesisIntensity, v -> settings.hdHaptic.synthesisIntensity = v)
+				.controller(opt -> FloatSliderControllerBuilder.create(opt)
+						.range(0f, 2f)
+						.step(0.05f)
+						.formatValue(percentOrOffFormatter))
+				.available(enabledOption.pendingValue() && !hdHapticsNotSupported)
+				.build();
+		dependentOptions.add(synthesisIntensity);
+		group.option(synthesisIntensity);
+
+		for (FeedbackCategory category : FeedbackCategory.values()) {
+			String key = category.getSerializedName();
+			Option<Boolean> categoryOpt = Option.<Boolean>createBuilder()
+					.name(Component.translatable("controlify.gui.haptic_category." + key))
+					.description(OptionDescription.of(Component.translatable("controlify.gui.haptic_category." + key + ".tooltip")))
+					.binding(
+							true,
+							() -> settings.hdHaptic.categoryToggles.getOrDefault(category, true),
+							v -> settings.hdHaptic.categoryToggles.put(category, v)
+					)
+					.controller(TickBoxControllerBuilder::create)
+					.available(enabledOption.pendingValue() && !hdHapticsNotSupported)
+					.build();
+			dependentOptions.add(categoryOpt);
+			group.option(categoryOpt);
+		}
+
+		Option<Boolean> lowPass = Option.<Boolean>createBuilder()
+				.name(Component.translatable("controlify.gui.hd_haptics.low_pass"))
+				.description(OptionDescription.of(Component.translatable("controlify.gui.hd_haptics.low_pass.tooltip")))
+				.binding(defaults.hdHaptic.lowPassFilter, () -> settings.hdHaptic.lowPassFilter, v -> settings.hdHaptic.lowPassFilter = v)
+				.controller(TickBoxControllerBuilder::create)
+				.available(enabledOption.pendingValue() && !hdHapticsNotSupported)
+				.build();
+		dependentOptions.add(lowPass);
+		group.option(lowPass);
+
+		Option<Boolean> suppressRumble = Option.<Boolean>createBuilder()
+				.name(Component.translatable("controlify.gui.hd_haptics.suppress_rumble"))
+				.description(OptionDescription.of(Component.translatable("controlify.gui.hd_haptics.suppress_rumble.tooltip")))
+				.binding(defaults.hdHaptic.suppressRumble, () -> settings.hdHaptic.suppressRumble, v -> settings.hdHaptic.suppressRumble = v)
+				.controller(TickBoxControllerBuilder::create)
+				.available(enabledOption.pendingValue() && !hdHapticsNotSupported)
+				.build();
+		dependentOptions.add(suppressRumble);
+		group.option(suppressRumble);
+
+		// Cross-group refresh: invoked any time the user toggles allowVibration, the HD-haptics
+		// master enable, or the suppressRumble flag. Reads pending values from all three so the
+		// result reflects the user's session-only choices before they apply config.
+		Runnable refreshVibrationAvailability = () -> {
+			boolean hdSuppress = enabledOption.pendingValue() && suppressRumble.pendingValue();
+			boolean vibAllow = vibrationBuild.allowVibrationOption().pendingValue() && !hdSuppress;
+			vibrationBuild.allowVibrationOption().setAvailable(!hdSuppress);
+			vibrationBuild.dependentOptions().forEach(o -> o.setAvailable(vibAllow));
+		};
+		// Fill the slot the vibration group's own listener calls into.
+		vibrationBuild.refreshSlot()[0] = refreshVibrationAvailability;
+		enabledOption.addListener((opt, event) -> refreshVibrationAvailability.run());
+		suppressRumble.addListener((opt, event) -> refreshVibrationAvailability.run());
+		// Set initial state right away so the screen opens with correct availability rather than
+		// waiting for the first user toggle.
+		refreshVibrationAvailability.run();
+
+		// Spatial-falloff bounds in blocks. "Near range" = full amplitude inside this radius.
+		// "Far range" = silence-point cap (per-feature ranges are still honoured as ceilings).
+		Option<Float> falloffNear = Option.<Float>createBuilder()
+				.name(Component.translatable("controlify.gui.hd_haptics.falloff_near"))
+				.description(OptionDescription.of(Component.translatable("controlify.gui.hd_haptics.falloff_near.tooltip")))
+				.binding(defaults.hdHaptic.falloffNearBlocks,
+						() -> settings.hdHaptic.falloffNearBlocks,
+						v -> settings.hdHaptic.falloffNearBlocks = v)
+				.controller(opt -> FloatSliderControllerBuilder.create(opt)
+						.range(0f, 32f)
+						.step(1f)
+						.formatValue(blocksFormatter))
+				.available(enabledOption.pendingValue() && !hdHapticsNotSupported)
+				.build();
+		dependentOptions.add(falloffNear);
+		group.option(falloffNear);
+
+		Option<Float> falloffFar = Option.<Float>createBuilder()
+				.name(Component.translatable("controlify.gui.hd_haptics.falloff_far"))
+				.description(OptionDescription.of(Component.translatable("controlify.gui.hd_haptics.falloff_far.tooltip")))
+				.binding(defaults.hdHaptic.falloffFarBlocks,
+						() -> settings.hdHaptic.falloffFarBlocks,
+						v -> settings.hdHaptic.falloffFarBlocks = v)
+				.controller(opt -> FloatSliderControllerBuilder.create(opt)
+						.range(4f, 256f)
+						.step(1f)
+						.formatValue(blocksFormatter))
+				.available(enabledOption.pendingValue() && !hdHapticsNotSupported)
+				.build();
+		dependentOptions.add(falloffFar);
+		group.option(falloffFar);
+
+		if (controller.isPresent() && controller.get().hdHaptics().isPresent()) {
+			HDHapticComponent haptics = controller.get().hdHaptics().get();
+			group.option(ButtonOption.createBuilder()
+					.name(Component.translatable("controlify.gui.hd_haptics.test"))
+					.description(OptionDescription.of(Component.translatable("controlify.gui.hd_haptics.test.tooltip")))
+					.action((screen, btn) -> {
+						// Synthesized double-thump heartbeat
+						HapticWaveform thump = HapticWaveform.withASR(HapticWaveform.sine(50f, 200, 0.85f), 15, 80, 100);
+						HapticWaveform silence = HapticWaveform.sine(50f, 200, 0f);
+						haptics.dispatcher().playOneShot(HapticWaveform.concat(thump, silence, thump));
+					})
 					.build());
 		}
 
-		return Optional.of(vibrationGroup.build());
+		return Optional.of(group.build());
+	}
+
+	private Optional<OptionGroup> makeAdaptiveTriggersGroup(
+			ProfileSettings settings,
+			ProfileSettings defaults,
+			Optional<ControllerEntity> controller
+	) {
+		var group = OptionGroup.createBuilder()
+				.name(Component.translatable("controlify.gui.group.adaptive_triggers"))
+				.description(OptionDescription.createBuilder()
+						.text(Component.translatable("controlify.gui.group.adaptive_triggers.tooltip"))
+						.build());
+
+		boolean triggersNotSupported = controller.isPresent()
+				&& controller.get().dualSense().map(c -> !c.support().triggerEffects()).orElse(true);
+		if (triggersNotSupported) {
+			group.option(LabelOption.create(notSupportedText(Component.translatable("controlify.gui.group.adaptive_triggers"))));
+		}
+
+		List<Option<?>> dependentOptions = new ArrayList<>();
+		Option<Boolean> enabledOption = Option.<Boolean>createBuilder()
+				.name(Component.translatable("controlify.gui.adaptive_triggers.enabled"))
+				.description(OptionDescription.of(Component.translatable("controlify.gui.adaptive_triggers.enabled.tooltip")))
+				.binding(defaults.dualsense.triggerEffects, () -> settings.dualsense.triggerEffects, v -> settings.dualsense.triggerEffects = v)
+				.addListener((opt, event) -> {
+					boolean avail = opt.pendingValue() && !triggersNotSupported;
+					dependentOptions.forEach(o -> o.setAvailable(avail));
+					if (!opt.pendingValue() && controller.isPresent()) {
+						controller.get().dualSense().ifPresent(ds -> ds.adaptiveTriggers().clearAll());
+					}
+				})
+				.controller(TickBoxControllerBuilder::create)
+				.build();
+		group.option(enabledOption);
+
+		Option<Float> strengthOption = Option.<Float>createBuilder()
+				.name(Component.translatable("controlify.gui.adaptive_triggers.strength"))
+				.description(OptionDescription.of(Component.translatable("controlify.gui.adaptive_triggers.strength.tooltip")))
+				.binding(defaults.dualsense.triggerStrengthMultiplier, () -> settings.dualsense.triggerStrengthMultiplier, v -> settings.dualsense.triggerStrengthMultiplier = v)
+				.controller(opt -> FloatSliderControllerBuilder.create(opt)
+						.range(0f, 2f)
+						.step(0.05f)
+						.formatValue(percentOrOffFormatter))
+				.available(enabledOption.pendingValue() && !triggersNotSupported)
+				.build();
+		dependentOptions.add(strengthOption);
+		group.option(strengthOption);
+
+		for (FeedbackCategory category : FeedbackCategory.values()) {
+			String key = category.getSerializedName();
+			Option<Boolean> categoryOpt = Option.<Boolean>createBuilder()
+					.name(Component.translatable("controlify.gui.adaptive_triggers.category." + key))
+					.description(OptionDescription.of(Component.translatable("controlify.gui.adaptive_triggers.category." + key + ".tooltip")))
+					.binding(
+							true,
+							() -> settings.dualsense.triggerCategoryToggles.getOrDefault(category, true),
+							v -> settings.dualsense.triggerCategoryToggles.put(category, v)
+					)
+					.controller(TickBoxControllerBuilder::create)
+					.available(enabledOption.pendingValue() && !triggersNotSupported)
+					.build();
+			dependentOptions.add(categoryOpt);
+			group.option(categoryOpt);
+		}
+
+		if (controller.isPresent() && controller.get().dualSense().isPresent()) {
+			DualsenseComponent ds = controller.get().dualSense().get();
+			group.option(ButtonOption.createBuilder()
+					.name(Component.translatable("controlify.gui.adaptive_triggers.test"))
+					.description(OptionDescription.of(Component.translatable("controlify.gui.adaptive_triggers.test.tooltip")))
+					.action((screen, btn) -> runTriggerTest(ds.adaptiveTriggers()))
+					.build());
+		}
+
+		return Optional.of(group.build());
+	}
+
+	private static void runTriggerTest(AdaptiveTriggerDispatcher dispatcher) {
+		// The test sequence ends on Bow (a USE action in real gameplay), so pick the trigger that
+		// USE is currently bound to. Fall back to ATTACK's trigger if USE isn't a trigger, then RIGHT.
+		TriggerSide side = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.USE);
+		if (side == null) side = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.ATTACK);
+		if (side == null) side = TriggerSide.RIGHT;
+		final TriggerSide effectiveSide = side;
+
+		int durationTicks = 25;
+		Minecraft mc = Minecraft.getInstance();
+
+		dispatcher.setLayer(effectiveSide, TriggerReason.TEST, 1000,
+				new DualsenseTriggerEffect.Feedback((byte) 3, (byte) 8), durationTicks);
+
+		Thread t = new Thread(() -> {
+			try {
+				Thread.sleep(1250);
+				mc.execute(() -> dispatcher.setLayer(effectiveSide, TriggerReason.TEST, 1000,
+						new DualsenseTriggerEffect.Weapon((byte) 3, (byte) 6, (byte) 6), durationTicks));
+				Thread.sleep(1250);
+				mc.execute(() -> dispatcher.setLayer(effectiveSide, TriggerReason.TEST, 1000,
+						new DualsenseTriggerEffect.Bow((byte) 2, (byte) 8, (byte) 6, (byte) 6), durationTicks));
+			} catch (InterruptedException ignored) {
+				Thread.currentThread().interrupt();
+			}
+		}, "ControlifyTriggerTest");
+		t.setDaemon(true);
+		t.start();
 	}
 
 	private Optional<OptionGroup> makeGyroGroup(
@@ -711,32 +1004,6 @@ public class ControllerConfigScreenFactory {
 		}));
 
 		return Optional.of(gyroGroup.build());
-	}
-
-	private Optional<OptionGroup> makeTriggerEffectsGroup(
-		ProfileSettings settings,
-		ProfileSettings defaults,
-		Optional<ControllerEntity> controller
-	) {
-		var group = OptionGroup.createBuilder()
-			.name(Component.translatable("controlify.gui.group.trigger_effects"))
-			.description(OptionDescription.createBuilder()
-				.text(Component.translatable("controlify.gui.trigger_effects.tooltip"))
-				.build());
-
-		if (controller.isPresent() && controller.get().dualSense().isEmpty()) {
-			group.collapsed(true);
-			group.option(LabelOption.create(Component.translatable("controlify.gui.group.trigger_effects.no_dualsense.tooltip").withStyle(ChatFormatting.RED)));
-		}
-
-		group.option(Option.<Boolean>createBuilder()
-			.name(Component.translatable("controlify.gui.trigger_effects"))
-			.description(OptionDescription.of(Component.translatable("controlify.gui.trigger_effects.tooltip")))
-			.binding(defaults.dualsense.triggerEffects, () -> settings.dualsense.triggerEffects, v -> settings.dualsense.triggerEffects = v)
-			.controller(TickBoxControllerBuilder::create)
-			.build());
-
-		return Optional.of(group.build());
 	}
 
 	private Optional<ConfigCategory> makeBindsCategory(
