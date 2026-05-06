@@ -55,6 +55,10 @@ public final class HDHapticTickHandler {
     private boolean portalPreActive = false;
     /** Ticks the player has been standing in a portal block — drives the swirl crescendo. */
     private int portalPreTicks = 0;
+    /** Set when a dimension change fires while inside a portal block; suppresses the pre-portal
+     *  loop until the player leaves the destination portal block. Without this the loop keeps
+     *  going on the destination side because the player typically spawns inside a portal block. */
+    private boolean portalPreSuppressed = false;
     private boolean horseGallopActive = false;
     /** Last tick we saw the horse airborne — triggers a jump landing thump on transition. */
     private boolean horseAirborneLast = false;
@@ -109,18 +113,25 @@ public final class HDHapticTickHandler {
         }
     }
 
-    /** Builds an AM-modulated swirl loop that crescendos as the player stays in a portal block.
-     *  Resets when they leave. The post-transport sweep ({@link #tickDimensionSweep}) handles the
-     *  actual transition; this is the wind-up. */
+    /** Builds an AM-modulated swirl loop that fades in slowly while the player stands in a
+     *  portal block, crescendoing right at the dimension-change moment (~80 ticks = 4 s, matching
+     *  vanilla's nether-portal cooldown). Resets when the player leaves. The dimension-sweep
+     *  handler ({@link #tickDimensionSweep}) handles the actual transition and suppresses this
+     *  loop until the player leaves the destination portal block. */
     private void tickPortalPreTransport(LocalPlayer player) {
         var feet = player.level().getBlockState(player.blockPosition());
         boolean inPortal = feet.is(net.minecraft.world.level.block.Blocks.NETHER_PORTAL)
                 || feet.is(net.minecraft.world.level.block.Blocks.END_PORTAL);
-        if (inPortal) {
+
+        // Clear suppression as soon as the player leaves the portal block — re-entry should
+        // crescendo again from scratch.
+        if (!inPortal) {
+            portalPreSuppressed = false;
+        }
+
+        if (inPortal && !portalPreSuppressed) {
             portalPreTicks = Math.min(80, portalPreTicks + 1); // 4-second cap
             if (!portalPreActive) {
-                // Heavier carrier so the entrance is felt immediately, with a stronger AM mod
-                // for clear swirl rhythm. Per user feedback the previous level was too subtle.
                 HapticWaveform carrier = HapticWaveform.sine(40f, 1000, 0.85f);
                 HapticWaveform mod = HapticWaveform.sine(2.5f, 1000, 0.7f);
                 HapticWaveform am = HapticWaveform.am(carrier, mod);
@@ -129,10 +140,11 @@ public final class HDHapticTickHandler {
             }
             HapticLoop loop = component.dispatcher().getLoop(PORTAL_PRE_LOOP);
             if (loop != null) {
-                // Stronger crescendo: starts higher (0.4 baseline) and saturates earlier, so the
-                // entrance is felt within the first half-second rather than building over 4s.
-                float ramp = Math.min(1f, (float) portalPreTicks / 40f);
-                loop.setAmplitude((0.4f + 0.6f * ramp) * intensity());
+                // Slow fade-in over the 4-second portal cooldown. Squared so the back end is
+                // dramatic — early seconds are barely felt, the last second peaks, then the
+                // dimension-sweep takes over at the transition.
+                float ramp = Math.min(1f, (float) portalPreTicks / 80f);
+                loop.setAmplitude(ramp * ramp * intensity());
             }
         } else {
             if (portalPreActive) {
@@ -143,7 +155,8 @@ public final class HDHapticTickHandler {
         }
     }
 
-    /** Fire a long sweep waveform when the player crosses a dimension boundary. */
+    /** Fire a long sweep waveform when the player crosses a dimension boundary, and suppress
+     *  the portal pre-transport loop until the player leaves the destination portal block. */
     private void tickDimensionSweep(LocalPlayer player) {
         var current = player.level().dimension();
         if (lastDimension == null) {
@@ -152,6 +165,16 @@ public final class HDHapticTickHandler {
         }
         if (current.equals(lastDimension)) return;
         lastDimension = current;
+
+        // Stop the pre-portal loop and prevent it from re-engaging on the destination side
+        // (where the player typically spawns still inside a portal block).
+        if (portalPreActive) {
+            component.dispatcher().stopLoop(PORTAL_PRE_LOOP);
+            portalPreActive = false;
+        }
+        portalPreTicks = 0;
+        portalPreSuppressed = true;
+
         // Sweep: low rumble that AM-modulates faster as it ends, on top of any portal-travel
         // passthrough already firing. Long enough to feel like the dimension transition itself.
         HapticWaveform carrier = HapticWaveform.sine(45f, 1200, 0.8f * intensity());
