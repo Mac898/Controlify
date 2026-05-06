@@ -352,9 +352,23 @@ public class InGameInputHandler {
 		Vector2d lookImpulse = new Vector2d();
 		controller.gyro().ifPresent(gyro -> handleGyroLook(gyro, lookImpulse, aiming));
 
-		if (controller.gyro().map(gyro -> gyro.settings().maxLookSensitivity() > 0 && gyro.settings().flickStick).orElse(false)) {
+		// Flick-stick is only used for ground / static-camera situations. While elytra-flying the
+		// stick is needed for continuous steering — a snap-turn is the wrong shape, and once the
+		// user holds the stick deflected for steering the magnitude never drops below the
+		// re-arm threshold so subsequent flicks never register. Fall back to regular look in
+		// that case so smooth proportional rotation drives the elytra direction.
+		boolean flickStickEnabled = controller.gyro().map(gyro ->
+				gyro.settings().maxLookSensitivity() > 0 && gyro.settings().flickStick).orElse(false);
+		boolean elytraFlying = player != null && player.isFallFlying();
+		if (flickStickEnabled && !elytraFlying) {
 			handleFlickStick(player);
 		} else {
+			// If we just transitioned out of flick-stick mode (e.g. just deployed elytra), reset
+			// the holding-phase state so when the player lands and re-engages, the next flick
+			// starts fresh instead of resuming as a delta from the last held angle.
+			if (flickInProgress) {
+				flickInProgress = false;
+			}
 			controller.input().ifPresent(input -> handleRegularLook(input, lookImpulse, aiming, player));
 		}
 
