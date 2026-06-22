@@ -274,13 +274,10 @@ public class Controlify implements ControlifyApi {
         }
 
         // register events
-        PlatformClientUtil.registerClientStopping(client -> {
-            // Close controllers first so native drivers (e.g. libds5's PipeWire audio bridge + cadence
-            // thread) are torn down before the process exits — otherwise those native threads leak and
-            // PipeWire's teardown can hang the JVM shutdown (process stays alive until killed).
-            if (this.controllerManager != null) this.controllerManager.close();
-            this.controllerHIDService().stop();
-        });
+        // Note: controllers (and their native drivers, incl. libds5's PipeWire bridge + cadence thread)
+        // are closed on shutdown by MinecraftMixin.onMinecraftClose -> ControllerManager.close(); don't
+        // also close them here or they get closed twice (SDLCommonDriver.close() throws on the 2nd call).
+        PlatformClientUtil.registerClientStopping(client -> this.controllerHIDService().stop());
 
         if (this.config().getSettings().globalSettings().useEnhancedSteamDeckDriver) {
             doSteamDeckChecks();
