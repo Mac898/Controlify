@@ -197,6 +197,49 @@ END
 Include native libraries for SDL3 in the jar.
  */
 
+/*
+START
+Bundle the locally-built libds5 native (DualSense HD haptics + adaptive triggers over
+Bluetooth) into the jar at JNA's resource path, so Native.load("ds5") auto-extracts and
+loads it from the classpath — working inside sandboxed launchers (PrismLauncher/Flatpak)
+with NO -Djna.library.path and no system install. Linux x86-64 only for now: there is no
+published libds5 artifact yet, so it is sourced from a local meson build. Override the
+source dir with -Plibds5BuildDir=/path or the LIBDS5_BUILD_DIR env var. If the .so is
+absent (e.g. CI, or other platforms) the build still succeeds and the feature simply stays
+off at runtime (LibDs5.getOrNull() returns null -> graceful degrade). libds5.so itself
+needs libopus.so.0 + libpipewire-0.3.so.0 available in the runtime (standard in the
+Flatpak freedesktop runtime).
+ */
+val libds5BuildDir: String = (findProperty("libds5BuildDir") as String?)
+    ?: System.getenv("LIBDS5_BUILD_DIR")
+    ?: "${System.getProperty("user.home")}/Software/libds5/build"
+
+val prepareLibds5Natives = tasks.register<Sync>("prepareLibds5Natives") {
+    group = "controlify/internal"
+
+    into(layout.buildDirectory.dir("generated-resources/ds5-natives"))
+
+    // A missing source dir/file is skipped silently (Linux-only / no local build).
+    from(libds5BuildDir) {
+        include("libds5.so")
+        into("linux-x86-64/")
+    }
+}
+
+sourceSets {
+    main {
+        resources.srcDir(prepareLibds5Natives.map { it.destinationDir })
+    }
+}
+
+tasks.processResources {
+    dependsOn(prepareLibds5Natives)
+}
+/*
+END
+Include the libds5 native in the jar.
+ */
+
 
 val releaseModVersion by tasks.registering {
     group = "controlify/versioned"

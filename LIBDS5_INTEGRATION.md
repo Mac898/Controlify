@@ -100,18 +100,32 @@ just logged once (`DS5_OK` → info, `DS5_ENOTSUP` → debug, else → warn). `c
 the controller is connected; the virtual devices are torn down when the BT owner closes.
 
 ## Loading the native lib
-The native lib is loaded by base name `ds5` (`libds5.so`).
+The native lib is loaded by base name `ds5` (`libds5.so`) via `Native.load("ds5")`.
 
-- **End users (recommended):** install libds5 system-wide — `meson install` drops `libds5.so` into
-  `/usr/local/lib/<triplet>` (Linux) / a standard prefix, which is on the loader/JNA search path, so
-  `Native.load("ds5")` finds it automatically with **no JVM flag**.
-- **Development (uninstalled build dir):** point JNA at the build output:
-  ```
-  -Djna.library.path=/home/mac/Software/libds5/build
-  ```
+**Bundled in the jar (default, sandbox-proof).** `build.gradle.kts` has a `prepareLibds5Natives` task
+that copies the locally-built `libds5.so` into the jar at JNA's resource path
+`linux-x86-64/libds5.so`. JNA auto-extracts and loads it from the classpath — so it works inside
+**sandboxed launchers (PrismLauncher/Flatpak)** with **no `-Djna.library.path` and no system install**.
+The source dir defaults to `~/Software/libds5/build`; override with `-Plibds5BuildDir=/path` or the
+`LIBDS5_BUILD_DIR` env var. **Rebuild libds5 (`ninja -C build`) before building the mod jar** so the
+latest `.so` is bundled.
 
-If the library can't be loaded, `LibDs5.getOrNull()` returns `null`, `LibDs5DualSense.tryCreate` logs a
-single warning and returns `null`, and BT rich features simply stay off — the mod never crashes.
+- **Linux x86-64 only for now** — there is no published libds5 artifact yet, so only the local-build
+  native is bundled. Other platforms (and CI without a local build) ship without it: the feature stays
+  off at runtime, the mod still runs. (Future: publish per-platform libds5 natives like the SDL3 ones
+  and add them to `nativeTargets`.)
+- **Runtime deps:** `libds5.so` needs `libopus.so.0` + `libpipewire-0.3.so.0` present in the runtime
+  (standard in the Flatpak freedesktop runtime). If loading fails with an `UnsatisfiedLinkError` naming
+  one of those, that dep is missing from the sandbox/runtime.
+- **Alternatives** if you're not using the bundled native: install libds5 system-wide
+  (`sudo meson install` → `/usr/local/lib/<triplet>`, on the loader path) or, for an unsandboxed dev run,
+  `-Djna.library.path=/home/mac/Software/libds5/build`.
+
+If the library can't be loaded by any route, `LibDs5.getOrNull()` returns `null`, `LibDs5DualSense.tryCreate`
+logs a single warning and returns `null`, and BT rich features simply stay off — the mod never crashes.
+**This is exactly what the "HD Haptics not supported" UI reflects when the native is absent** — the
+detection (`hasHdHaptics()` → `HDHapticComponent` presence → the GUI label) is working correctly; it just
+needs the native to load.
 
 ## Compile status
 - **The two new files (`LibDs5.java`, `LibDs5DualSense.java`) compile cleanly** — re-verified with a
@@ -134,8 +148,9 @@ so the controller reverts to gamepad-only reporting rather than streaming audio 
 See `DS5Dongle/8-dual-control.md` §8.6.
 
 ## TODOs / risks
-- **Native packaging (TODO):** ship/extract `libds5` from the jar at runtime like libsdl4j /
-  `SDLNativesLoader` does, instead of requiring `jna.library.path`. Today dev-only.
+- **Native packaging (DONE for Linux x86-64):** `libds5.so` is now bundled into the jar at
+  `linux-x86-64/libds5.so` and auto-extracted by JNA (see "Loading the native lib"). Remaining: publish
+  per-platform libds5 natives (aarch64/macOS/Windows) and add them to `nativeTargets`, like SDL3.
 - **Single-owner-for-ALL-output (follow-up TODO):** today over BT, libds5 owns triggers + haptics while
   SDL still owns LED/rumble/volume/other state — a deliberate, benign two-writer split (disjoint
   valid-flags). A future refactor could make libds5 the single owner of *all* DualSense output over BT,
