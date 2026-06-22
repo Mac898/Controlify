@@ -81,6 +81,21 @@ public interface LibDs5 extends Library {
     /** @return 1 if libds5 was built with libopus (speaker/mic), else 0. */
     int ds5_has_opus();
 
+    /**
+     * Enable/disable DualSense <b>audio mode</b> (the {@code 0x36} report stream). HD haptics, speaker
+     * and mic ALL ride {@code 0x36}; with audio mode off, libds5's safety gate emits none of them (only
+     * the {@code 0x31} state path — triggers/LEDs/rumble — works). So this MUST be enabled for HD haptics
+     * and the audio bridge to do anything.
+     *
+     * <p><b>Safety:</b> enabling audio mode makes the controller interleave audio/mic data into its
+     * {@code 0x31} INPUT reports. That is only safe when something stops the OS HID driver from
+     * misparsing them — i.e. the {@code hid-playstation-ds5} ("C-lite") kernel module is installed (it
+     * drops those reports), or the kernel driver is unbound. Without that, audio mode corrupts gamepad
+     * input (mouse/keyboard chaos under Steam Input). Controlify only enables this on the Bluetooth path
+     * where the user is expected to have the C-lite module.
+     */
+    void ds5_set_audio_mode(Pointer device, int enable);
+
     // ---- Adaptive triggers --------------------------------------------------
     /**
      * Queue an adaptive-trigger effect. Maps the C signature

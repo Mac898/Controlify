@@ -274,7 +274,13 @@ public class Controlify implements ControlifyApi {
         }
 
         // register events
-        PlatformClientUtil.registerClientStopping(client -> this.controllerHIDService().stop());
+        PlatformClientUtil.registerClientStopping(client -> {
+            // Close controllers first so native drivers (e.g. libds5's PipeWire audio bridge + cadence
+            // thread) are torn down before the process exits — otherwise those native threads leak and
+            // PipeWire's teardown can hang the JVM shutdown (process stays alive until killed).
+            if (this.controllerManager != null) this.controllerManager.close();
+            this.controllerHIDService().stop();
+        });
 
         if (this.config().getSettings().globalSettings().useEnhancedSteamDeckDriver) {
             doSteamDeckChecks();

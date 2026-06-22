@@ -89,6 +89,13 @@ public final class LibDs5DualSense {
                 return null;
             }
 
+            // Enable audio mode so HD haptics / speaker / mic (all carried on the 0x36 report) are
+            // actually emitted — without this, libds5's safety gate sends only 0x31 (triggers/LEDs/
+            // rumble) and the audio features silently do nothing. Safe here because this is the
+            // Bluetooth path and the user is expected to have the hid-playstation-ds5 kernel module
+            // (which drops the audio-mode input reports so they don't corrupt gamepad input).
+            lib.ds5_set_audio_mode(device, 1);
+
             int rc = lib.ds5_start_stream(device);
             if (rc != 0) {
                 logger.warn("libds5 ds5_start_stream() failed (rc={}); closing and disabling BT rich features.", rc);
