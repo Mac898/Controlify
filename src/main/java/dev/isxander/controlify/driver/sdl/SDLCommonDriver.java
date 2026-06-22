@@ -21,6 +21,8 @@ import dev.isxander.controlify.controller.misc.BluetoothDeviceComponent;
 import dev.isxander.controlify.controller.rumble.RumbleComponent;
 import dev.isxander.controlify.controller.rumble.TriggerRumbleComponent;
 import dev.isxander.controlify.driver.Driver;
+import dev.isxander.controlify.driver.libds5.LibDs5;
+import dev.isxander.controlify.driver.libds5.LibDs5DualSense;
 import dev.isxander.controlify.driver.sdl.dualsense.DS5EffectsState;
 import dev.isxander.controlify.rumble.RumbleState;
 import dev.isxander.controlify.rumble.TriggerRumbleState;
@@ -84,6 +86,14 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
     @Nullable
     protected SDL_AudioSpec dualsenseAudioSpec;
     protected final List<AudioStreamHandle> dualsenseAudioHandles;
+
+    /**
+     * Bluetooth-only owner of libds5's HD-haptics + adaptive-trigger transport. Non-null only when
+     * this is a DualSense on Bluetooth and libds5 opened successfully. Over USB this stays null and
+     * the SDL audio-device path is used unchanged.
+     */
+    @Nullable
+    protected LibDs5DualSense libds5DualSense;
     
     public SDLCommonDriver(SDL_Controller ptrController, SDL_JoystickID jid, ControllerType type, ControlifyLogger logger) {
         this.ptrController = ptrController;
@@ -121,8 +131,15 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
             this.isDualsense = true;
             logger.debugLog("DualSense controller detected.");
 
-            // macOS HD haptics are broken
-            if (Util.getPlatform() != Util.OS.OSX && SDLNativesLoader.get().orElseThrow().hasAudio()) {
+            if (isBluetooth()) {
+                // Over Bluetooth SDL exposes no DualSense haptic audio device, so HD haptics + adaptive
+                // triggers were previously gated off. libds5 provides the BT transport: open it here and
+                // forward Controlify's already-authored effect bytes + haptic PCM to it. The SDL audio
+                // path below is intentionally skipped on BT — libds5 is the single output owner.
+                this.libds5DualSense = LibDs5DualSense.tryCreate(logger);
+            } else if (Util.getPlatform() != Util.OS.OSX && SDLNativesLoader.get().orElseThrow().hasAudio()) {
+                // USB path — unchanged: HD haptics rendered to the SDL 4-channel DualSense audio device.
+                // macOS HD haptics are broken
                 SDL_AudioDeviceID dualsenseAudioDev = null;
                 SDL_AudioSpec.ByReference devSpec = new SDL_AudioSpec.ByReference();
                 SDL_AudioDeviceID[] devices = SDL_GetAudioPlaybackDevices();
@@ -159,6 +176,11 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
         }
     }
 
+    /** True when HD haptics are available — via the SDL audio device (USB) or libds5 (Bluetooth). */
+    private boolean hasHdHaptics() {
+        return this.dualsenseAudioDev != null || (this.libds5DualSense != null && this.libds5DualSense.isActive());
+    }
+
     @Override
     public void addComponents(ControllerEntity controller) {
         controller.setComponent(new DriverNameComponent(this.name));
@@ -176,16 +198,18 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
             controller.setComponent(this.ledComponent = new LEDComponent(1));
         }
         if (this.isDualsense) {
+            // hapticAudio is true when HD haptics can render: SDL audio device (USB) or libds5 (BT).
+            // speakerOutput follows the SDL audio device only — libds5 speaker output is a future TODO.
             DualSenseFeatureSupport support = new DualSenseFeatureSupport(
                     true,
-                    this.dualsenseAudioDev != null,
+                    hasHdHaptics(),
                     true,
                     this.dualsenseAudioDev != null,
                     isBluetooth()
             );
             controller.setComponent(this.dualSenseComponent = new DualSenseComponent(support));
         }
-        if (this.dualsenseAudioDev != null) {
+        if (hasHdHaptics()) {
             controller.setComponent(this.hdHapticComponent = new HDHapticComponent());
             this.hdHapticComponent.acceptPlayHaptic(this::playHaptic);
         }
@@ -216,13 +240,18 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
         
         SDL_CloseController(ptrController);
         ptrController = null;
-        
+
         if (dualsenseAudioDev != null) {
             SDL_CloseAudioDevice(dualsenseAudioDev);
             dualsenseAudioDev = null;
             for (AudioStreamHandle handle : dualsenseAudioHandles) {
                 handle.close();
             }
+        }
+
+        if (libds5DualSense != null) {
+            libds5DualSense.close();
+            libds5DualSense = null;
         }
     }
     
@@ -292,17 +321,29 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
         if (dualSenseComponent == null) return;
         if (!this.dualSenseComponent.consumeDirty()) return;
 
+        // Bluetooth: divert ONLY the adaptive-trigger output to libds5; everything else (LEDs, mute
+        // light, volumes, etc.) still goes out via the existing SDL DS5EffectsState path below. libds5's
+        // trigger reports and SDL's state reports set disjoint valid-flag fields, so this benign
+        // coexistence is safe (same as hid-playstation / dualsensectl). We forward the resolved trigger
+        // bytes to libds5 AND suppress only the SDL trigger-effect send so triggers aren't double-driven.
+        boolean libds5Triggers = libds5DualSense != null && libds5DualSense.isActive();
+        if (libds5Triggers) {
+            updateDualSenseTriggersLibDs5();
+        }
+
         DS5EffectsState.ByValue effectsState = new DS5EffectsState.ByValue();
 
-        Optional.ofNullable(this.dualSenseComponent.getLeftTriggerEffect()).ifPresent(effect -> {
-            effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_LEFT_TRIGGER_FFB;
-            effectsState.rgucLeftTriggerEffect = effect.createState();
-        });
+        if (!libds5Triggers) {
+            Optional.ofNullable(this.dualSenseComponent.getLeftTriggerEffect()).ifPresent(effect -> {
+                effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_LEFT_TRIGGER_FFB;
+                effectsState.rgucLeftTriggerEffect = effect.createState();
+            });
 
-        Optional.ofNullable(this.dualSenseComponent.getRightTriggerEffect()).ifPresent(effect -> {
-            effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_RIGHT_TRIGGER_FFB;
-            effectsState.rgucRightTriggerEffect = effect.createState();
-        });
+            Optional.ofNullable(this.dualSenseComponent.getRightTriggerEffect()).ifPresent(effect -> {
+                effectsState.ucEnableBits1 |= DS5EffectsState.EnableBitFlags1.ALLOW_RIGHT_TRIGGER_FFB;
+                effectsState.rgucRightTriggerEffect = effect.createState();
+            });
+        }
 
         DualSenseComponent.MuteLightMode muteMode = this.dualSenseComponent.getMuteLightMode();
         if (muteMode != null) {
@@ -350,6 +391,23 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
         SDL_SendControllerEffect(ptrController, effectsState.getPointer(), Native.getNativeSize(DS5EffectsState.ByValue.class));
     }
 
+    /**
+     * Bluetooth trigger path: forward the resolved left/right {@link DS5EffectsState.TriggerEffect}
+     * bytes to libds5. Controlify authors these exactly as on USB (via {@code DualsenseTriggerEffect});
+     * we only change the transport. A {@code null} side effect means "leave unchanged" (the dispatcher
+     * only sets a side when it changes), so we skip it rather than forcing it off.
+     */
+    private void updateDualSenseTriggersLibDs5() {
+        var left = this.dualSenseComponent.getLeftTriggerEffect();
+        if (left != null) {
+            libds5DualSense.setTriggerEffect(LibDs5.DS5_SIDE_LEFT, left.createState());
+        }
+        var right = this.dualSenseComponent.getRightTriggerEffect();
+        if (right != null) {
+            libds5DualSense.setTriggerEffect(LibDs5.DS5_SIDE_RIGHT, right.createState());
+        }
+    }
+
     private void updateHDHaptic() {
         for (int i = 0; i < dualsenseAudioHandles.size(); i++) {
             AudioStreamHandle handle = dualsenseAudioHandles.get(i);
@@ -364,6 +422,14 @@ public abstract class SDLCommonDriver<SDL_Controller> implements Driver {
 
     private void playHaptic(CompleteSoundData sound) {
         if (sound == null) return;
+
+        // Bluetooth: push the haptic PCM to libds5 (the SDL audio device is absent on BT). libds5
+        // converts/resamples and coalesces it into the BT audio report stream.
+        if (libds5DualSense != null && libds5DualSense.isActive()) {
+            libds5DualSense.pushHaptics(sound);
+            return;
+        }
+
         if (ptrController == null || dualsenseAudioDev == null || dualsenseAudioSpec == null) {
             return;
         }
