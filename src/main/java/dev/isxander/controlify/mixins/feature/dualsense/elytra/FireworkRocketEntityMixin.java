@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 isXander
+ * This file is part of Controlify.
+ *
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ */
 package dev.isxander.controlify.mixins.feature.dualsense.elytra;
 
 import dev.isxander.controlify.bindings.ControlifyBindings;
@@ -26,37 +32,37 @@ import java.util.OptionalInt;
  */
 @Mixin(FireworkRocketEntity.class)
 public class FireworkRocketEntityMixin {
-    @Shadow
-    @Final
-    private static EntityDataAccessor<OptionalInt> DATA_ATTACHED_TO_TARGET;
+	@Shadow
+	@Final
+	private static EntityDataAccessor<OptionalInt> DATA_ATTACHED_TO_TARGET;
 
-    @Inject(method = "tick", at = @At("RETURN"))
-    private void controlify$onFireworkTick(CallbackInfo ci) {
-        FireworkRocketEntity self = (FireworkRocketEntity) (Object) this;
-        OptionalInt attachedId = self.getEntityData().get(DATA_ATTACHED_TO_TARGET);
-        if (attachedId.isEmpty()) return;
+	@Inject(method = "tick", at = @At("RETURN"))
+	private void controlify$onFireworkTick(CallbackInfo ci) {
+		FireworkRocketEntity self = (FireworkRocketEntity) (Object) this;
+		OptionalInt attachedId = self.getEntityData().get(DATA_ATTACHED_TO_TARGET);
+		if (attachedId.isEmpty()) return;
 
-        LocalPlayer player = Minecraft.getInstance().player;
-        if (player == null) return;
-        if (attachedId.getAsInt() != player.getId()) return;
-        if (!player.isFallFlying()) return;
+		LocalPlayer player = Minecraft.getInstance().player;
+		if (player == null) return;
+		if (attachedId.getAsInt() != player.getId()) return;
+		if (!player.isFallFlying()) return;
 
-        // The firework was activated via the USE binding; route the rev to that trigger so a remap travels with it.
-        TriggerSide side = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.USE);
-        AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.ELYTRA_FIREWORK);
-        if (side == null || dispatcher == null) return;
+		// The firework was activated via the USE binding; route the rev to that trigger so a remap travels with it.
+		TriggerSide side = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.USE);
+		AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.ELYTRA_FIREWORK);
+		if (side == null || dispatcher == null) return;
 
-        // Pure Vibration (no resistance) so the user can keep firing rockets without fighting the
-        // trigger. Felt across the whole travel range — the boost rev is the goal, not a wall.
-        dispatcher.setLayer(
-                side,
-                ControlifyTriggerReasons.ELYTRA_FIREWORK,
-                ControlifyTriggerReasons.PRIORITY_ACTION,
-                new DualsenseTriggerEffect.Vibration(
-                        (byte) 0,
-                        AdaptiveTriggerHelper.scaleStrength(8),
-                        (byte) 60
-                )
-        );
-    }
+		// Pure Vibration (no resistance) so the user can keep firing rockets without fighting the
+		// trigger. Felt across the whole travel range — the boost rev is the goal, not a wall.
+		dispatcher.setLayer(
+				side,
+				ControlifyTriggerReasons.ELYTRA_FIREWORK,
+				ControlifyTriggerReasons.PRIORITY_ACTION,
+				new DualsenseTriggerEffect.Vibration(
+						(byte) 0,
+						AdaptiveTriggerHelper.scaleStrength(8),
+						(byte) 60
+				)
+		);
+	}
 }

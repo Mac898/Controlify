@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 isXander
+ * This file is part of Controlify.
+ *
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ */
 package dev.isxander.controlify.controller;
 
 import com.mojang.serialization.Codec;
@@ -25,18 +31,18 @@ import net.minecraft.util.StringRepresentable;
  * systems; their hardware is unrelated even though the categorisation is shared.
  */
 public enum FeedbackCategory implements StringRepresentable {
-    MOVEMENT("movement"),
-    COMBAT("combat"),
-    AMBIENT("ambient"),
-    UI("ui"),
-    ITEMS("items"),
-    ENVIRONMENT("environment"),
-    MISC("misc");
+	MOVEMENT("movement"),
+	COMBAT("combat"),
+	AMBIENT("ambient"),
+	UI("ui"),
+	ITEMS("items"),
+	ENVIRONMENT("environment"),
+	MISC("misc");
 
-    public static final Codec<FeedbackCategory> CODEC = StringRepresentable.fromEnum(FeedbackCategory::values);
+	public static final Codec<FeedbackCategory> CODEC = StringRepresentable.fromEnum(FeedbackCategory::values);
 
-    private final String name;
-    FeedbackCategory(String name) { this.name = name; }
+	private final String name;
+	FeedbackCategory(String name) { this.name = name; }
 
-    @Override public String getSerializedName() { return name; }
+	@Override public String getSerializedName() { return name; }
 }

@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 isXander
+ * This file is part of Controlify.
+ *
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ */
 package dev.isxander.controlify.controller.dualsense;
 
 import dev.isxander.controlify.driver.dualsense.DualsenseTriggerEffect;
@@ -8,12 +14,12 @@ import dev.isxander.controlify.driver.dualsense.DualsenseTriggerEffect;
  * Layers without a heartbeat for {@link AdaptiveTriggerDispatcher#HEARTBEAT_TIMEOUT_TICKS} ticks are reaped.
  */
 public interface TriggerHandle {
-    /** Reset the heartbeat timer. Call each tick to keep the layer alive. */
-    void heartbeat();
+	/** Reset the heartbeat timer. Call each tick to keep the layer alive. */
+	void heartbeat();
 
-    /** Replace the layer's effect without changing its priority. Also heartbeats. */
-    void update(DualsenseTriggerEffect newEffect);
+	/** Replace the layer's effect without changing its priority. Also heartbeats. */
+	void update(DualsenseTriggerEffect newEffect);
 
-    /** Remove the layer immediately. */
-    void release();
+	/** Remove the layer immediately. */
+	void release();
 }

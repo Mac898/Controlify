@@ -131,8 +131,7 @@ public class MultiPlayerGameModeMixin {
 		firePulseForStage(currentStage);
 	}
 
-	@Unique
-	private void firePulseForStage(int stage) {
+	@Unique private void firePulseForStage(int stage) {
 		AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.BLOCK_BREAK);
 		if (dispatcher == null || breakSide == null) return;
 		// Each crack starts at max amp for the stage; decays via the per-tick handler above.
@@ -168,8 +167,7 @@ public class MultiPlayerGameModeMixin {
 		}
 	}
 
-	@Unique
-	private void startRumble(BlockState state) {
+	@Unique private void startRumble(BlockState state) {
 		stopRumble();
 
 		var effect = ContinuousRumbleEffect.builder()
@@ -193,8 +191,7 @@ public class MultiPlayerGameModeMixin {
 		// and we want startBreakTrigger to detect the still-active layer to insert the discrete gap.
 	}
 
-	@Unique
-	private void releaseBreakTrigger() {
+	@Unique private void releaseBreakTrigger() {
 		if (blockBreakTrigger != null) {
 			blockBreakTrigger.release();
 			blockBreakTrigger = null;
@@ -204,8 +201,7 @@ public class MultiPlayerGameModeMixin {
 		pulseDecayTick = -1;
 	}
 
-	@Unique
-	private void startBreakTrigger(BlockState state) {
+	@Unique private void startBreakTrigger(BlockState state) {
 		if (!isEffectiveTool(state)) {
 			releaseBreakTrigger();
 			// Wrong-tool warning — short low pink-noise burst on the haptic actuator so the user
@@ -221,8 +217,7 @@ public class MultiPlayerGameModeMixin {
 		pulseDecayTick = -1;
 	}
 
-	@Unique
-	private static byte controlify$pickToolFreq(int stage) {
+	@Unique private static byte controlify$pickToolFreq(int stage) {
 		net.minecraft.client.player.LocalPlayer player = net.minecraft.client.Minecraft.getInstance().player;
 		if (player == null) return (byte) (30 + stage * 2);
 		net.minecraft.world.item.ItemStack stack = player.getMainHandItem();
@@ -248,8 +243,7 @@ public class MultiPlayerGameModeMixin {
 		return (byte) Math.min(127, base + stage * 2);
 	}
 
-	@Unique
-	private static void firePinkNoiseWarning() {
+	@Unique private static void firePinkNoiseWarning() {
 		ControllerEntity controller = ControlifyApi.get().getCurrentController().orElse(null);
 		if (controller == null) return;
 		var hd = controller.hdHaptics().orElse(null);
@@ -263,8 +257,7 @@ public class MultiPlayerGameModeMixin {
 				dev.isxander.controlify.controller.haptic.HapticWaveform.pinkNoise(120, amp), 5, 60, 55));
 	}
 
-	@Unique
-	private void fireInstabreakClick(BlockState state) {
+	@Unique private void fireInstabreakClick(BlockState state) {
 		if (!isEffectiveTool(state)) return;
 		TriggerSide side = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.ATTACK);
 		AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.BLOCK_BREAK);
@@ -285,8 +278,7 @@ public class MultiPlayerGameModeMixin {
 	 * Mining stone with a fist or wood with a feather feels weak and slow precisely because it is —
 	 * surfacing that as trigger feedback is misleading noise.
 	 */
-	@Unique
-	private static boolean isEffectiveTool(BlockState state) {
+	@Unique private static boolean isEffectiveTool(BlockState state) {
 		if (!state.requiresCorrectToolForDrops()) return true;
 		net.minecraft.client.player.LocalPlayer player = net.minecraft.client.Minecraft.getInstance().player;
 		return player != null && player.hasCorrectToolForDrops(state);

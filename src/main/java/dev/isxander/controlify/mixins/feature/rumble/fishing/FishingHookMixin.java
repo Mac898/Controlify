@@ -119,8 +119,7 @@ public class FishingHookMixin {
 		}
 	}
 
-	@Unique
-	private static void controlify$fireSoftPulse(float amp, float freq, int durMs) {
+	@Unique private static void controlify$fireSoftPulse(float amp, float freq, int durMs) {
 		var hd = ControlifyApi.get().getCurrentController()
 				.flatMap(dev.isxander.controlify.controller.ControllerEntity::hdHaptics)
 				.orElse(null);
@@ -149,8 +148,7 @@ public class FishingHookMixin {
 		if (isLocalPlayerHook) controlify$fireCastTrigger();
 	}
 
-	@Unique
-	private static void controlify$fireCastTrigger() {
+	@Unique private static void controlify$fireCastTrigger() {
 		TriggerSide useSide = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.USE);
 		AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.FISHING_CAST);
 		if (useSide == null || dispatcher == null) return;
@@ -164,8 +162,7 @@ public class FishingHookMixin {
 		);
 	}
 
-	@Unique
-	private void startBiteTriggers() {
+	@Unique private void startBiteTriggers() {
 		AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.FISHING_BITE);
 		if (dispatcher != null) {
 			TriggerSide useSide = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.USE);
@@ -197,8 +194,7 @@ public class FishingHookMixin {
 		}
 	}
 
-	@Unique
-	private void stopBiteTriggers() {
+	@Unique private void stopBiteTriggers() {
 		if (controlify$biteTrigger != null) {
 			controlify$biteTrigger.release();
 			controlify$biteTrigger = null;

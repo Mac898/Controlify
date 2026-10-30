@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 isXander
+ * This file is part of Controlify.
+ *
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ */
 package dev.isxander.controlify.controller.dualsense;
 
 /**
@@ -6,13 +12,13 @@ package dev.isxander.controlify.controller.dualsense;
  * Critical for macOS, where audio device detection is unreliable and gated in {@code SDLCommonDriver}.
  */
 public record DualSenseFeatureSupport(
-        boolean triggerEffects,
-        boolean hapticAudio,
-        boolean playerIndicators,
-        boolean speakerOutput,
-        boolean isBluetooth
+		boolean triggerEffects,
+		boolean hapticAudio,
+		boolean playerIndicators,
+		boolean speakerOutput,
+		boolean isBluetooth
 ) {
-    public static DualSenseFeatureSupport unsupported() {
-        return new DualSenseFeatureSupport(false, false, false, false, false);
-    }
+	public static DualSenseFeatureSupport unsupported() {
+		return new DualSenseFeatureSupport(false, false, false, false, false);
+	}
 }

@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 isXander
+ * This file is part of Controlify.
+ *
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ */
 package dev.isxander.controlify.mixins.feature.hdhaptics;
 
 import dev.isxander.controlify.api.ControlifyApi;
@@ -15,10 +21,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(SoundEngine.class)
 public class SoundEngineSoundInterceptMixin {
-    @Inject(method = "play(Lnet/minecraft/client/resources/sounds/SoundInstance;)Lnet/minecraft/client/sounds/SoundEngine$PlayResult;", at = @At("HEAD"))
-    private void controlify$dispatchHaptic(SoundInstance instance, CallbackInfoReturnable<net.minecraft.client.sounds.SoundEngine.PlayResult> cir) {
-        ControlifyApi.get().getCurrentController()
-                .flatMap(ControllerEntity::hdHaptics)
-                .ifPresent(component -> component.dispatcher().dispatchSound(instance));
-    }
+	@Inject(method = "play(Lnet/minecraft/client/resources/sounds/SoundInstance;)Lnet/minecraft/client/sounds/SoundEngine$PlayResult;", at = @At("HEAD"))
+	private void controlify$dispatchHaptic(SoundInstance instance, CallbackInfoReturnable<net.minecraft.client.sounds.SoundEngine.PlayResult> cir) {
+		ControlifyApi.get().getCurrentController()
+				.flatMap(ControllerEntity::hdHaptics)
+				.ifPresent(component -> component.dispatcher().dispatchSound(instance));
+	}
 }

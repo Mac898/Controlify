@@ -242,8 +242,7 @@ public abstract class LocalPlayerMixin extends LivingEntityMixin implements UseI
 		crossbowWasLoaded = false;
 	}
 
-	@Unique
-	private void startTrigger(ItemStack stack, ItemUseAnimation anim) {
+	@Unique private void startTrigger(ItemStack stack, ItemUseAnimation anim) {
 		switch (anim) {
 			case BOW -> {
 				TriggerSide side = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.USE);

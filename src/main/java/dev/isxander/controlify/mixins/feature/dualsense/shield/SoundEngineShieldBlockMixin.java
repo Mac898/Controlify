@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 isXander
+ * This file is part of Controlify.
+ *
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ */
 package dev.isxander.controlify.mixins.feature.dualsense.shield;
 
 import dev.isxander.controlify.bindings.ControlifyBindings;
@@ -22,24 +28,24 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(SoundEngine.class)
 public class SoundEngineShieldBlockMixin {
-    @Inject(method = "play(Lnet/minecraft/client/resources/sounds/SoundInstance;)Lnet/minecraft/client/sounds/SoundEngine$PlayResult;", at = @At("HEAD"))
-    private void controlify$onShieldBlockSound(SoundInstance instance, CallbackInfoReturnable<SoundEngine.PlayResult> cir) {
-        Identifier id = instance.getIdentifier();
-        if (!"minecraft".equals(id.getNamespace()) || !"item.shield.block".equals(id.getPath())) return;
+	@Inject(method = "play(Lnet/minecraft/client/resources/sounds/SoundInstance;)Lnet/minecraft/client/sounds/SoundEngine$PlayResult;", at = @At("HEAD"))
+	private void controlify$onShieldBlockSound(SoundInstance instance, CallbackInfoReturnable<SoundEngine.PlayResult> cir) {
+		Identifier id = instance.getIdentifier();
+		if (!"minecraft".equals(id.getNamespace()) || !"item.shield.block".equals(id.getPath())) return;
 
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || !mc.player.isBlocking()) return;
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null || !mc.player.isBlocking()) return;
 
-        TriggerSide side = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.USE);
-        AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.SHIELD_PULSE);
-        if (side == null || dispatcher == null) return;
+		TriggerSide side = AdaptiveTriggerHelper.triggerSideForBinding(ControlifyBindings.USE);
+		AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.SHIELD_PULSE);
+		if (side == null || dispatcher == null) return;
 
-        dispatcher.setLayer(
-                side,
-                ControlifyTriggerReasons.SHIELD_PULSE,
-                ControlifyTriggerReasons.PRIORITY_COMBAT_BURST,
-                new DualsenseTriggerEffect.Vibration((byte) 6, AdaptiveTriggerHelper.scaleStrength(8), (byte) 100),
-                2
-        );
-    }
+		dispatcher.setLayer(
+				side,
+				ControlifyTriggerReasons.SHIELD_PULSE,
+				ControlifyTriggerReasons.PRIORITY_COMBAT_BURST,
+				new DualsenseTriggerEffect.Vibration((byte) 6, AdaptiveTriggerHelper.scaleStrength(8), (byte) 100),
+				2
+		);
+	}
 }

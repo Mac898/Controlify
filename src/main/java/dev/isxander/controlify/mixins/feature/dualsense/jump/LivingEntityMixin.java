@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 isXander
+ * This file is part of Controlify.
+ *
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ */
 package dev.isxander.controlify.mixins.feature.dualsense.jump;
 
 import dev.isxander.controlify.controller.dualsense.AdaptiveTriggerDispatcher;
@@ -19,19 +25,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(LivingEntity.class)
 public class LivingEntityMixin {
-    @Inject(method = "jumpFromGround", at = @At("HEAD"))
-    private void controlify$onLocalPlayerJump(CallbackInfo ci) {
-        if ((Object) this != Minecraft.getInstance().player) return;
-        // Skip when riding (horse jump charge handles that case separately).
-        if (Minecraft.getInstance().player.getVehicle() != null) return;
-        AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.JUMP_ON_FOOT);
-        if (dispatcher == null) return;
+	@Inject(method = "jumpFromGround", at = @At("HEAD"))
+	private void controlify$onLocalPlayerJump(CallbackInfo ci) {
+		if ((Object) this != Minecraft.getInstance().player) return;
+		// Skip when riding (horse jump charge handles that case separately).
+		if (Minecraft.getInstance().player.getVehicle() != null) return;
+		AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.JUMP_ON_FOOT);
+		if (dispatcher == null) return;
 
-        DualsenseTriggerEffect kick = new DualsenseTriggerEffect.Vibration(
-                (byte) 0, AdaptiveTriggerHelper.scaleStrength(3), (byte) 35);
-        dispatcher.setLayer(TriggerSide.LEFT, ControlifyTriggerReasons.JUMP_ON_FOOT,
-                ControlifyTriggerReasons.PRIORITY_ACTION, kick, 2);
-        dispatcher.setLayer(TriggerSide.RIGHT, ControlifyTriggerReasons.JUMP_ON_FOOT,
-                ControlifyTriggerReasons.PRIORITY_ACTION, kick, 2);
-    }
+		DualsenseTriggerEffect kick = new DualsenseTriggerEffect.Vibration(
+				(byte) 0, AdaptiveTriggerHelper.scaleStrength(3), (byte) 35);
+		dispatcher.setLayer(TriggerSide.LEFT, ControlifyTriggerReasons.JUMP_ON_FOOT,
+				ControlifyTriggerReasons.PRIORITY_ACTION, kick, 2);
+		dispatcher.setLayer(TriggerSide.RIGHT, ControlifyTriggerReasons.JUMP_ON_FOOT,
+				ControlifyTriggerReasons.PRIORITY_ACTION, kick, 2);
+	}
 }
