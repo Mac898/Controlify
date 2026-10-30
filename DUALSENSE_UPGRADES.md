@@ -2,7 +2,7 @@
 
 60+ concrete upgrade ideas for Controlify's DualSense handling, grouped by system, each
 with a one-line rationale and a pointer to where it lands. Effects authoring is
-bus-agnostic (USB via SDL, Bluetooth via libds5), so unless noted these apply to both.
+transport-agnostic, so unless noted these apply to any connection.
 Cross-reference the current state in `DUALSENSE_EFFECTS.md`.
 
 Priority tags: **[P1]** high value / low effort · **[P2]** solid · **[P3]** ambitious / research.
@@ -48,7 +48,7 @@ Priority tags: **[P1]** high value / low effort · **[P2]** solid · **[P3]** am
 ## B. Adaptive triggers — fidelity & systems
 
 16. **[P1] Read back trigger telemetry** — the input report carries trigger effect/status
-    nibbles (libds5 already parses `left/right_trigger_status`). Surface them so effects
+    nibbles (`left/right_trigger_status`). Surface them so effects
     can confirm the controller accepted the mode and self-heal on desync.
 17. **[P2] Smooth effect transitions** — interpolate between consecutive `Feedback`/`Bow`
     states over a few ticks instead of hard-switching, to remove "stair-stepping" feel.
@@ -101,11 +101,9 @@ Priority tags: **[P1]** high value / low effort · **[P2]** solid · **[P3]** am
     is mono. Pan footsteps/impacts/proximity by source direction for spatial feel.
 37. **[P2] Proper haptic mixer/bus** — multiple simultaneous sources (heartbeat + footsteps
     + rain) currently rely on the controller/driver; add an explicit software mix bus with
-    per-source gain + soft clip so layering is predictable. libds5 takes one stereo stream,
-    so mixing belongs mod-side for the BT path.
-38. **[P2] Resampler quality** — libds5 uses linear interpolation (aliases on downsample).
-    Upgrade to polyphase/speexdsp for cleaner haptic + speaker resampling. (libds5 TODO
-    already noted in `ds5_audio.c`.)
+    per-source gain + soft clip so layering is predictable.
+38. **[P2] Resampler quality** — Upgrade to polyphase/speexdsp resampling for cleaner haptic
+    + speaker output.
 39. **[P2] Loudness normalisation for passthrough** — game OGGs vary wildly in level;
     normalise to a target RMS before quantising so haptic strength is consistent.
 40. **[P1] Cooldown/limit polish** — the 3-tick per-sound cooldown is global; make it
@@ -124,8 +122,8 @@ Priority tags: **[P1]** high value / low effort · **[P2]** solid · **[P3]** am
 ## E. Embedded speaker — the big opportunity (mostly greenfield)
 
 45. **[P1] Route chosen game audio to the speaker** — the headline TODO. Add a `speakerOutput`
-    path that sends selected sounds (or a submix) to the controller speaker via libds5
-    (`ds5_push_speaker`) / the SDL audio device. Gate by category like haptics.
+    path that sends selected sounds (or a submix) to the controller speaker via the SDL
+    audio device. Gate by category like haptics.
 46. **[P1] "Personal sounds" submix** — UI clicks, level-up, advancement toasts, low-health
     warning, item pickup → the controller speaker (close, personal) while world audio stays
     on the TV/headset. High immersion, low bandwidth.
@@ -133,17 +131,16 @@ Priority tags: **[P1]** high value / low effort · **[P2]** solid · **[P3]** am
     `setSpeakerVolume`/`setSpeakerMuted` (plumbing already exists) in YACL, plus a
     "which categories go to the speaker" matrix.
 48. **[P2] Auto headphone/speaker routing** — follow the controller's headphone-plug bit
-    (libds5 parses `headphones`) to switch between `0x13` speaker and `0x16` headset
-    segments automatically (libds5 already picks the segment; expose policy mod-side).
+    (`headphones` in the input report) to switch between `0x13` speaker and `0x16` headset
+    segments automatically.
 49. **[P2] Voice/ambient cues** — villager "hmm", totem pop, raid horn, or a configurable
     proximity ping out of the controller speaker.
 50. **[P3] Directional white-noise compass** — pan a faint cue across speaker vs haptics to
     hint at an objective bearing (accessibility + exploration).
 51. **[P2] Speaker click for trigger detents** — pair a tiny speaker tick with adaptive-
     trigger detents (place/break) for a tactile-plus-audible "snap."
-52. **[P3] Mic integration (input)** — libds5 already decodes the DualSense mic to a
-    PipeWire source; expose it to voice-chat mods (Simple Voice Chat) as a selectable input,
-    closing the full-duplex loop.
+52. **[P3] Mic integration (input)** — expose the DualSense mic to voice-chat mods
+    (Simple Voice Chat) as a selectable input, closing the full-duplex loop.
 53. **[P2] Speaker test + level meter** — a settings button that plays a test tone and shows
     capture level, mirroring the haptic test, so users can verify routing/volume.
 54. **[P3] Sidetone / haptic-from-speaker coherence** — when a sound plays on both speaker
@@ -156,25 +153,19 @@ Priority tags: **[P1]** high value / low effort · **[P2]** solid · **[P3]** am
     retune mappings without recompiling.
 56. **[P2] Per-controller capability cache** — detect edge/firmware variants and disable
     unsupported effects gracefully (some clones lack adaptive triggers).
-57. **[P1] Native packaging for libds5** — bundle per-platform `libds5.so/.dll/.dylib` (only
-    `linux-x86-64` is bundled now) via published artifacts like SDL3, so BT rich features
-    work cross-platform out of the box.
-58. **[P2] Telemetry/diagnostics overlay** — a debug HUD showing active trigger layers per
+57. **[P2] Telemetry/diagnostics overlay** — a debug HUD showing active trigger layers per
     side, current haptic sources, and bus/transport — invaluable for tuning and bug reports.
-59. **[P2] Battery-aware throttling** — reduce haptic/speaker intensity and BT audio cadence
-    when controller battery is low (libds5 parses battery %), to extend playtime.
-60. **[P1] Accessibility presets** — "reduced motion," "haptics-only (no triggers)," and a
+58. **[P2] Battery-aware throttling** — reduce haptic/speaker intensity
+    when controller battery is low, to extend playtime.
+59. **[P1] Accessibility presets** — "reduced motion," "haptics-only (no triggers)," and a
     global intensity that also tames classic rumble, for users sensitive to strong forces.
-61. **[P2] Latency budget + soak test** — measure event→haptic onset and run a 30-min soak
-    (BT cadence/drop-frame) to catch the audio jitter/underrun class of bugs (see the
+60. **[P2] Latency budget + soak test** — measure event→haptic onset and run a 30-min soak
+    (audio cadence/drop-frame) to catch the audio jitter/underrun class of bugs (see the
     speaker-buzz investigation note).
-62. **[P2] Profile import/export & sharing** — let users export their trigger/haptic tuning
+61. **[P2] Profile import/export & sharing** — let users export their trigger/haptic tuning
     as a shareable file/string.
-63. **[P3] Per-dimension / modpack profiles** — auto-select an effect profile by dimension
+62. **[P3] Per-dimension / modpack profiles** — auto-select an effect profile by dimension
     or detected modpack (Nether = more heat textures, etc.).
-64. **[P2] Graceful multi-writer story over BT** — document/enforce that libds5 owns
-    triggers+haptics while SDL owns LED/volume; add the speaker/volume setters to libds5 so
-    a future single-owner refactor is possible without regressing volume control.
 
 ---
 

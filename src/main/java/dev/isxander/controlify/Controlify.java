@@ -382,9 +382,7 @@ public class Controlify implements ControlifyApi {
         );
         wizard.addStage(
                 // Only warn about missing Bluetooth features when HD haptics are actually
-                // unavailable. With libds5 active over Bluetooth the DualSense gets HD haptics +
-                // adaptive triggers, so the "you may be missing features" warning would be wrong.
-                // hdHaptics() is present iff libds5 (BT) or the SDL audio device (USB) provides it.
+                // unavailable. hdHaptics() is present iff the SDL audio device (USB) provides it.
                 () -> controller.dualSense().isPresent()
                         && controller.hdHaptics().isEmpty()
                         && controller.bluetooth().map(bt -> !bt.settings().dontShowWarning).orElse(false),

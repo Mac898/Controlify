@@ -3,14 +3,11 @@
 A complete catalogue of every DualSense rich-feedback effect Controlify produces:
 the adaptive-trigger effects and where they fire, the HD-haptic waveforms and how
 they're synthesised, and the current state of speaker output. This is a *reference*
-(what exists, with exact parameters); `plan.md` is the status/roadmap and
-`LIBDS5_INTEGRATION.md` covers the Bluetooth transport.
+(what exists, with exact parameters); `plan.md` is the status/roadmap.
 
-> **Transports.** Over **USB**, triggers go through `SDL_SendControllerEffect` and HD
-> haptics render to a 4-channel SDL audio device. Over **Bluetooth**, both are forwarded
-> to **libds5** (a native lib that owns the BT `0x31`/`0x36` HID stream); the *effect
-> authoring below is identical on both buses* — only the transport differs. See
-> `LIBDS5_INTEGRATION.md`.
+> **Transport.** Triggers go through `SDL_SendControllerEffect` and HD haptics render to a
+> 4-channel SDL audio device, which SDL only exposes over **USB**. Over Bluetooth the
+> HD-haptics and speaker paths are unavailable.
 
 Three independent systems, often layered together for one event:
 
@@ -220,16 +217,14 @@ Only **volume/mute plumbing** exists — no game audio is routed to the speaker 
 - The 4-channel USB audio device is `[speaker, speaker, haptic_L, haptic_R]`; Controlify
   *forces channels 0/1 to silence* every buffer so haptic PCM never spills to the speaker.
 - `DualSenseFeatureSupport.speakerOutput` is true only for the USB SDL audio device.
-- Over **Bluetooth**, libds5 can expose the speaker/mic as PipeWire virtual audio devices
-  (`ds5_audio_bridge_*`), but Controlify routes no game audio to it — that's the TODO.
 
 See `DUALSENSE_UPGRADES.md` for proposed speaker work.
 
 ---
 
 ## Source map
-- Trigger types/encoding: `driver/sdl/dualsense/DualsenseTriggerEffect{,Types}.java`
+- Trigger types/encoding: `driver/dualsense/DualsenseTriggerEffect{,Types}.java`
 - Trigger reasons/dispatch: `controller/dualsense/{AdaptiveTriggerDispatcher,AdaptiveTriggerHelper,AdaptiveTriggerTickHandler,ControlifyTriggerReasons,TriggerReason,TriggerHandle,TriggerSide}.java` + `mixins/feature/{rumble,dualsense,hdhaptics}/**`
 - Haptic synthesis: `controller/haptic/{HapticWaveform,HDHapticTickHandler,HDHapticDispatcher,HDHapticComponent,HapticSoundRegistry,HapticSoundDefaults}.java`
-- Settings/UI: `config/settings/profile/{DualSenseSettings,HDHapticSettings}.java`, `gui/screen/ControllerConfigScreenFactory.java`, `assets/controlify/lang/en_us.json`
-- Transport: `driver/sdl/SDLCommonDriver.java` (USB + BT branch), `driver/libds5/**`, `LIBDS5_INTEGRATION.md`
+- Settings/UI: `config/settings/profile/{DualsenseSettings,HDHapticSettings}.java`, `gui/screen/ControllerConfigScreenFactory.java`, `assets/controlify/lang/en_us.json`
+- Transport: `driver/sdl/SDLCommonDriver.java`
