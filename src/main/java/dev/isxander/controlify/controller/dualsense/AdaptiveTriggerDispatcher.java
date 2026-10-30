@@ -1,7 +1,7 @@
 package dev.isxander.controlify.controller.dualsense;
 
 import dev.isxander.controlify.driver.dualsense.DualsenseTriggerEffect;
-import net.minecraft.client.Minecraft;
+import dev.isxander.controlify.utils.MinecraftUtil;
 import net.minecraft.resources.Identifier;
 
 import java.util.EnumMap;
@@ -72,7 +72,7 @@ public final class AdaptiveTriggerDispatcher {
     }
 
     public void tick() {
-        boolean screenOpen = Minecraft.getInstance().screen != null;
+        boolean screenOpen = MinecraftUtil.getScreen() != null;
 
         for (TriggerSide side : TriggerSide.values()) {
             Map<Identifier, Layer> map = layersBySide.get(side);

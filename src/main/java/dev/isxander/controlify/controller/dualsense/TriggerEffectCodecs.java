@@ -80,6 +80,48 @@ public final class TriggerEffectCodecs {
 				.forGetter(DualsenseTriggerEffect.VibrationMultiplePosition::amplitude)
 		).apply(instance, DualsenseTriggerEffect.VibrationMultiplePosition::new));
 
+	public static final MapCodec<DualsenseTriggerEffect.Bow> MAP_CODEC_BOW =
+		RecordCodecBuilder.mapCodec(instance -> instance.group(
+			CExtraCodecs.byteRange(1, 8).fieldOf("start_position")
+				.forGetter(DualsenseTriggerEffect.Bow::startPosition),
+			CExtraCodecs.byteRange(2, 8).fieldOf("end_position")
+				.forGetter(DualsenseTriggerEffect.Bow::endPosition),
+			CExtraCodecs.byteRange(0, 8).fieldOf("strength")
+				.forGetter(DualsenseTriggerEffect.Bow::strength),
+			CExtraCodecs.byteRange(0, 8).fieldOf("snap_force")
+				.forGetter(DualsenseTriggerEffect.Bow::snapForce)
+		).apply(instance, DualsenseTriggerEffect.Bow::new));
+
+	public static final MapCodec<DualsenseTriggerEffect.Galloping> MAP_CODEC_GALLOPING =
+		RecordCodecBuilder.mapCodec(instance -> instance.group(
+			CExtraCodecs.byteRange(0, 8).fieldOf("start_position")
+				.forGetter(DualsenseTriggerEffect.Galloping::startPosition),
+			CExtraCodecs.byteRange(1, 9).fieldOf("end_position")
+				.forGetter(DualsenseTriggerEffect.Galloping::endPosition),
+			CExtraCodecs.byteRange(0, 15).fieldOf("first_foot")
+				.forGetter(DualsenseTriggerEffect.Galloping::firstFoot),
+			CExtraCodecs.byteRange(0, 15).fieldOf("second_foot")
+				.forGetter(DualsenseTriggerEffect.Galloping::secondFoot),
+			Codec.BYTE.fieldOf("frequency")
+				.forGetter(DualsenseTriggerEffect.Galloping::frequency)
+		).apply(instance, DualsenseTriggerEffect.Galloping::new));
+
+	public static final MapCodec<DualsenseTriggerEffect.Machine> MAP_CODEC_MACHINE =
+		RecordCodecBuilder.mapCodec(instance -> instance.group(
+			CExtraCodecs.byteRange(0, 8).fieldOf("start_position")
+				.forGetter(DualsenseTriggerEffect.Machine::startPosition),
+			CExtraCodecs.byteRange(1, 9).fieldOf("end_position")
+				.forGetter(DualsenseTriggerEffect.Machine::endPosition),
+			CExtraCodecs.byteRange(0, 7).fieldOf("amplitude_a")
+				.forGetter(DualsenseTriggerEffect.Machine::amplitudeA),
+			CExtraCodecs.byteRange(0, 7).fieldOf("amplitude_b")
+				.forGetter(DualsenseTriggerEffect.Machine::amplitudeB),
+			Codec.BYTE.fieldOf("frequency")
+				.forGetter(DualsenseTriggerEffect.Machine::frequency),
+			Codec.BYTE.fieldOf("period")
+				.forGetter(DualsenseTriggerEffect.Machine::period)
+		).apply(instance, DualsenseTriggerEffect.Machine::new));
+
 	private record TriggerEffectType<T extends DualsenseTriggerEffect>(String id, MapCodec<T> mapCodec) {
 	}
 
@@ -104,6 +146,15 @@ public final class TriggerEffectCodecs {
 	private static final TriggerEffectType<DualsenseTriggerEffect.VibrationMultiplePosition> TYPE_VIBRATION_MULTIPLE_POSITION =
 		new TriggerEffectType<>("vibration_multiple_position", MAP_CODEC_VIBRATION_MULTIPLE_POSITION);
 
+	private static final TriggerEffectType<DualsenseTriggerEffect.Bow> TYPE_BOW =
+		new TriggerEffectType<>("bow", MAP_CODEC_BOW);
+
+	private static final TriggerEffectType<DualsenseTriggerEffect.Galloping> TYPE_GALLOPING =
+		new TriggerEffectType<>("galloping", MAP_CODEC_GALLOPING);
+
+	private static final TriggerEffectType<DualsenseTriggerEffect.Machine> TYPE_MACHINE =
+		new TriggerEffectType<>("machine", MAP_CODEC_MACHINE);
+
 	private static final Map<String, TriggerEffectType<? extends DualsenseTriggerEffect>> TYPES_BY_ID = Stream.of(
 		TYPE_OFF,
 		TYPE_FEEDBACK,
@@ -111,7 +162,10 @@ public final class TriggerEffectCodecs {
 		TYPE_VIBRATION,
 		TYPE_FEEDBACK_MULTIPLE_POSITION,
 		TYPE_FEEDBACK_SLOPE,
-		TYPE_VIBRATION_MULTIPLE_POSITION
+		TYPE_VIBRATION_MULTIPLE_POSITION,
+		TYPE_BOW,
+		TYPE_GALLOPING,
+		TYPE_MACHINE
 	).collect(Collectors.toUnmodifiableMap(
 		TriggerEffectType::id,
 		Function.identity()
@@ -130,6 +184,9 @@ public final class TriggerEffectCodecs {
 			case DualsenseTriggerEffect.FeedbackMultiplePosition _ -> TYPE_FEEDBACK_MULTIPLE_POSITION;
 			case DualsenseTriggerEffect.FeedbackSlope _ -> TYPE_FEEDBACK_SLOPE;
 			case DualsenseTriggerEffect.VibrationMultiplePosition _ -> TYPE_VIBRATION_MULTIPLE_POSITION;
+			case DualsenseTriggerEffect.Bow _ -> TYPE_BOW;
+			case DualsenseTriggerEffect.Galloping _ -> TYPE_GALLOPING;
+			case DualsenseTriggerEffect.Machine _ -> TYPE_MACHINE;
 		},
 		TriggerEffectType::mapCodec
 	);

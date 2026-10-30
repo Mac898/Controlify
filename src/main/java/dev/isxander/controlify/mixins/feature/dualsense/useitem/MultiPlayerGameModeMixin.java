@@ -9,11 +9,11 @@ import dev.isxander.controlify.driver.dualsense.DualsenseTriggerEffect;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.BucketItem;
-import net.minecraft.world.item.HoeItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.SpawnEggItem;
@@ -91,7 +91,7 @@ public class MultiPlayerGameModeMixin {
             return;
         }
 
-        if (stack.getItem() instanceof HoeItem) {
+        if (stack.is(ItemTags.HOES)) {
             AdaptiveTriggerDispatcher dispatcher = AdaptiveTriggerHelper.dispatcherFor(ControlifyTriggerReasons.HOE_TILL);
             if (dispatcher == null) return;
             dispatcher.setLayer(

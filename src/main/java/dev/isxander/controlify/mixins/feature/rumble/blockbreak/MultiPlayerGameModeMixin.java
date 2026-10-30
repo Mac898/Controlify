@@ -237,9 +237,9 @@ public class MultiPlayerGameModeMixin {
 		//             can-mine-stone signal which is what defines a pickaxe semantically.
 		//   default → mid generic (30..48) — fist or weapon facing a stone-with-a-pickaxe-only path
 		int base;
-		if (tool instanceof net.minecraft.world.item.AxeItem) base = 24;
-		else if (tool instanceof net.minecraft.world.item.ShovelItem) base = 40;
-		else if (tool instanceof net.minecraft.world.item.HoeItem) base = 18;
+		if (stack.is(net.minecraft.tags.ItemTags.AXES)) base = 24;
+		else if (stack.is(net.minecraft.tags.ItemTags.SHOVELS)) base = 40;
+		else if (stack.is(net.minecraft.tags.ItemTags.HOES)) base = 18;
 		else if (tool instanceof net.minecraft.world.item.ShearsItem) base = 75;
 		else if (tool instanceof net.minecraft.world.item.MaceItem) base = 22;
 		else if (stack.has(net.minecraft.core.component.DataComponents.TOOL)
